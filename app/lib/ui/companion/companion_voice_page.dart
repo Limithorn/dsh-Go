@@ -18,6 +18,7 @@ import '../../companion/companion_voice.dart';
 import '../../companion/companion_voice_source.dart';
 import '../../l10n/l10n.dart';
 import '../../speech/deepseek_speech.dart';
+import '../../speech/edge_tts.dart';
 import '../../speech/local_tts.dart';
 import '../../speech/speech_settings.dart';
 import '../../state/account_state.dart';
@@ -487,6 +488,25 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
                   onTap: () {
                     setState(() => _preview = null);
                     unawaited(_set(s.copyWith(deepseekVoice: voice)));
+                  },
+                ),
+            ],
+          ),
+        if (!following && chosen == CompanionVoiceSource.edge)
+          SettingsSection(
+            title: l10n.companionVoiceVoice,
+            footer: Text(l10n.companionVoiceEdgeFooter),
+            children: [
+              for (final voice in edgeVoices)
+                SettingsTile(
+                  key: ValueKey('voice-edge-${voice.id}'),
+                  title: voice.label,
+                  subtitle: voice.lang,
+                  chevron: false,
+                  trailing: s.edgeVoice == voice.id ? const Icon(AppIcons.selected, size: 20) : null,
+                  onTap: () {
+                    setState(() => _preview = null);
+                    unawaited(_set(s.copyWith(edgeVoice: voice.id)));
                   },
                 ),
             ],

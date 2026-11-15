@@ -34,6 +34,7 @@ import '../../state/account_state.dart';
 import '../../state/app_notes.dart';
 import '../../state/call_surface_state.dart';
 import '../../state/notify_state.dart';
+import '../../state/picture_in_picture.dart';
 import '../../state/voice_settings.dart';
 import '../../state/voice_state.dart';
 import '../chat/voice/voice_bridge.dart';
@@ -329,6 +330,11 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     }
   }
 
+  /// 缩成系统窗口（画中画），通话继续，人可以去做别的事。
+  Future<void> _enterPip() async {
+    await enterPictureInPicture();
+  }
+
   /// The call as a card at the bottom, over whatever is below the route.
   Widget _collapsedCard(L10n l10n, ThemeData theme) {
     final (status, _) = _status(l10n);
@@ -361,6 +367,12 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
               tooltip: l10n.speechCallExpand,
               icon: const Icon(Icons.open_in_full, size: 18),
               onPressed: () => setState(() => _collapsed = false),
+            ),
+            IconButton(
+              key: const ValueKey('call-picture-in-picture'),
+              tooltip: l10n.speechCallPictureInPicture,
+              icon: const Icon(Icons.picture_in_picture_alt, size: 18),
+              onPressed: ended ? null : _enterPip,
             ),
             IconButton(
               key: const ValueKey('call-collapsed-hang-up'),

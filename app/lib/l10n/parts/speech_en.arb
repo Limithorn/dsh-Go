@@ -111,6 +111,7 @@
   "speechCallHangUp": "Hang up",
   "speechCallCollapse": "Shrink the call",
   "speechCallExpand": "Open the call",
+  "speechCallPictureInPicture": "Shrink to a small window",
   "speechCallSpeakerOn": "Speaker",
   "speechCallEarpiece": "Earpiece",
   "speechBackdropTitle": "Call background",

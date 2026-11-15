@@ -10478,6 +10478,12 @@ abstract class L10n {
   /// **'微软 Edge 朗读的那套声音，不用 key、不花钱，要联网'**
   String get companionVoiceEdgeHint;
 
+  /// No description provided for @companionVoiceEdgeFooter.
+  ///
+  /// In zh, this message translates to:
+  /// **'这些声只在合成那一刻送到微软，文本不会被存下来。语速跟随上面的设置。'**
+  String get companionVoiceEdgeFooter;
+
   /// No description provided for @companionVoiceCustomHint.
   ///
   /// In zh, this message translates to:
@@ -37241,6 +37247,12 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'展开通话'**
   String get speechCallExpand;
+
+  /// No description provided for @speechCallPictureInPicture.
+  ///
+  /// In zh, this message translates to:
+  /// **'缩成小窗'**
+  String get speechCallPictureInPicture;
 
   /// No description provided for @speechCallSpeakerOn.
   ///

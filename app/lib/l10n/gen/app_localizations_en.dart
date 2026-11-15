@@ -5991,6 +5991,10 @@ class L10nEn extends L10n {
   String get companionVoiceEdgeHint => 'The voices behind Edge\'s read-aloud: no key, no charge, needs a network';
 
   @override
+  String get companionVoiceEdgeFooter =>
+      'The text goes to Microsoft only to be spoken, and is not kept. The pace above applies.';
+
+  @override
   String get companionVoiceCustomHint => 'Anything else: describe the request and the reply';
 
   @override
@@ -21405,6 +21409,9 @@ class L10nEn extends L10n {
 
   @override
   String get speechCallExpand => 'Open the call';
+
+  @override
+  String get speechCallPictureInPicture => 'Shrink to a small window';
 
   @override
   String get speechCallSpeakerOn => 'Speaker';
