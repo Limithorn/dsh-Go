@@ -18995,6 +18995,12 @@ class L10nZh extends L10n {
   String get speechCallHangUp => '挂断';
 
   @override
+  String get speechCallCollapse => '收起通话';
+
+  @override
+  String get speechCallExpand => '展开通话';
+
+  @override
   String get speechCallSpeakerOn => '免提';
 
   @override

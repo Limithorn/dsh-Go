@@ -69,7 +69,9 @@ Future<void> openChatCall(
   container.read(callSurfaceProvider.notifier).set(CallSurface.full);
   await Navigator.of(context).push(
     PageRouteBuilder<void>(
-      opaque: true,
+      // Transparent so a call can shrink to a card over the conversation
+      // instead of holding the whole screen (the page paints its own field).
+      opaque: false,
       fullscreenDialog: true,
       transitionDuration: AppMotion.of(context, const Duration(milliseconds: 520)),
       reverseTransitionDuration: AppMotion.of(context, AppMotion.collapse),
@@ -119,6 +121,13 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
 
   /// A finger on the light: it gives a little.
   bool _pressed = false;
+
+  /// 收起: the call as one card over the conversation. The page stays alive, so
+  /// the microphone and the turn under way carry on.
+  bool _collapsed = false;
+
+  /// Where the shrunk card has been dragged to, from its first place.
+  Offset _cardDrag = Offset.zero;
 
   /// The system asks for less motion (read each build): the light holds still
   /// and the page comes in without its staggered rise.
@@ -243,6 +252,8 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   void _changed() {
     if (!mounted) return;
     final phase = _call.phase;
+    // Hung up while shrunk: open up again so the reason can be read.
+    if (phase == CallPhase.ended && _collapsed) _collapsed = false;
     if (phase != _shown) {
       _arrived(phase);
       _shown = phase;
@@ -294,6 +305,73 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
       });
       if (phase != CallPhase.speaking) _stage.command('quiet');
     }
+  }
+
+  /// The call as a card at the bottom, over whatever is below the route.
+  Widget _collapsedCard(L10n l10n, ThemeData theme) {
+    final (status, _) = _status(l10n);
+    final ended = _call.phase == CallPhase.ended;
+    final ink = theme.colorScheme;
+    final screen = MediaQuery.sizeOf(context);
+    final card = Material(
+      key: const ValueKey('call-collapsed'),
+      elevation: 10,
+      borderRadius: BorderRadius.circular(22),
+      color: ink.surfaceContainerHigh,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 6, 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(AppIcons.voice, size: 18, color: ink.primary),
+            const SizedBox(width: 10),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 170),
+              child: Text(
+                status,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium,
+              ),
+            ),
+            IconButton(
+              key: const ValueKey('call-expand'),
+              tooltip: l10n.speechCallExpand,
+              icon: const Icon(Icons.open_in_full, size: 18),
+              onPressed: () => setState(() => _collapsed = false),
+            ),
+            IconButton(
+              key: const ValueKey('call-collapsed-hang-up'),
+              tooltip: l10n.speechCallHangUp,
+              icon: Icon(AppIcons.hangUp, size: 20, color: ink.error),
+              onPressed: ended ? null : _hangUp,
+            ),
+          ],
+        ),
+      ),
+    );
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: SafeArea(
+        minimum: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+        child: Transform.translate(
+          offset: _cardDrag,
+          child: GestureDetector(
+            // The card itself moves; the keys on it still take their taps.
+            onPanUpdate: (details) {
+              final next = _cardDrag + details.delta;
+              setState(() {
+                _cardDrag = Offset(
+                  next.dx.clamp(-screen.width + 200, screen.width - 200),
+                  next.dy.clamp(-screen.height + 200, screen.height / 2),
+                );
+              });
+            },
+            child: card,
+          ),
+        ),
+      ),
+    );
   }
 
   void _tick(double seconds) {
@@ -467,6 +545,7 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final theme = Theme.of(context);
+    if (_collapsed) return _collapsedCard(l10n, theme);
     _still = AppMotion.reduced(context);
     final settings = ref.watch(callSettingsProvider);
     final performance = ref.watch(performanceDefaultsProvider);
@@ -564,6 +643,7 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
                           live: !ended && _since != null,
                           blur: keyBlur,
                           onTranscript: _openTranscript,
+                          onCollapse: ended ? null : () => setState(() => _collapsed = true),
                           onBackdrop: ended
                               ? null
                               // Trying voices out plays on her speaker: she stops this reply first.
@@ -709,6 +789,7 @@ class _TopBar extends StatelessWidget {
     required this.live,
     required this.blur,
     required this.onTranscript,
+    required this.onCollapse,
     required this.onBackdrop,
   });
 
@@ -717,6 +798,7 @@ class _TopBar extends StatelessWidget {
   final bool live;
   final bool blur;
   final VoidCallback onTranscript;
+  final VoidCallback? onCollapse;
   final VoidCallback? onBackdrop;
 
   @override
@@ -771,6 +853,14 @@ class _TopBar extends StatelessWidget {
                 ),
               ),
             ),
+          ),
+          const SizedBox(width: 10),
+          _RoundKey(
+            key: const ValueKey('call-collapse'),
+            icon: Icons.keyboard_arrow_down,
+            label: l10n.speechCallCollapse,
+            blur: blur,
+            onTap: onCollapse,
           ),
           const SizedBox(width: 10),
           _RoundKey(
