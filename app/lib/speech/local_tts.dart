@@ -228,7 +228,13 @@ class LocalTts {
   /// One sentence as a 16-bit mono WAV. [sid] 48 is zf_xiaoyi; the default
   /// tempo is a little above the model's own.
   Uint8List speak(String text, {int sid = LocalTtsPack.chineseFemale, double speed = 1.1}) {
-    final audio = _tts.generate(text: text, sid: sid, speed: speed);
+    // eSpeak aborts the whole process on characters it has no phonemes for
+    // (`Failed to set eSpeak-ng voice` came right after a message with
+    // symbols in it). Only letters, digits and the punctuation a sentence
+    // needs reach the model; everything else is dropped.
+    final clean = text.replaceAll(_unspeakable, '').trim();
+    if (clean.isEmpty) throw const LocalTtsError('nothing to say');
+    final audio = _tts.generate(text: clean, sid: sid, speed: speed);
     if (audio.samples.isEmpty) throw const LocalTtsError('empty');
     return wavOf(audio.samples, audio.sampleRate);
   }
@@ -241,6 +247,14 @@ class LocalTts {
     }
   }
 }
+
+/// What a sentence is allowed to keep: letters, digits, whitespace and the
+/// punctuation that shapes a spoken line. Everything else (emoji, arrows,
+/// box drawing, control codes) is what makes eSpeak abort.
+final _unspeakable = RegExp(
+  r'[^\p{L}\p{N}\s，。！？；：、,.!?;:\u201c\u201d\u2018\u2019\u2014\u2013\-\(\)\[\]\u3001\u300a\u300b]',
+  unicode: true,
+);
 
 /// Float samples (-1..1) as a 16-bit PCM WAV.
 Uint8List wavOf(Float32List samples, int sampleRate) {
