@@ -231,6 +231,7 @@
   "companionVoiceLocalRemove": "删除模型",
   "companionVoiceEdge": "Edge 云端（微软）",
   "companionVoiceEdgeHint": "微软 Edge 朗读的那套声音，不用 key、不花钱，要联网",
+  "companionVoiceEdgeFooter": "这些声只在合成那一刻送到微软，文本不会被存下来。语速跟随上面的设置。",
   "companionVoiceCustomHint": "别的接口：自己填请求和返回的格式",
   "companionVoiceApi": "接口",
   "companionVoiceBase": "地址",

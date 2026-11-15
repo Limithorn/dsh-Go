@@ -1,9 +1,11 @@
 package io.github.ccch1mneyyy.dsh_app
 
+import android.app.PictureInPictureParams
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.util.Rational
 import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Build
@@ -226,6 +228,31 @@ class MainActivity : FlutterActivity() {
                             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
                     )
                     result.success(null)
+                }
+                // 语音通话: shrink the whole app into a system window over other apps, so
+                // the call keeps the microphone (a picture-in-picture activity still counts
+                // as visible) and the conversation is one tap away. Returns false when the
+                // system or the device does not allow it.
+                "enterPictureInPicture" -> {
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                        result.success(false)
+                        return@setMethodCallHandler
+                    }
+                    val params = PictureInPictureParams.Builder()
+                        .setAspectRatio(Rational(3, 4))
+                        .build()
+                    val entered = try {
+                        enterPictureInPictureMode(params)
+                    } catch (_: Exception) {
+                        false
+                    }
+                    result.success(entered)
+                }
+                // Whether the system has picture-in-picture for this app at all.
+                "pictureInPictureAvailable" -> {
+                    val available = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                        packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+                    result.success(available)
                 }
                 else -> result.notImplemented()
             }
