@@ -229,10 +229,12 @@ class LocalTts {
   /// tempo is a little above the model's own.
   Uint8List speak(String text, {int sid = LocalTtsPack.chineseFemale, double speed = 1.1}) {
     // eSpeak aborts the whole process on characters it has no phonemes for
-    // (`Failed to set eSpeak-ng voice` came right after a message with
-    // symbols in it). Only letters, digits and the punctuation a sentence
-    // needs reach the model; everything else is dropped.
-    final clean = text.replaceAll(_unspeakable, '').trim();
+    // (`Failed to set eSpeak-ng voice`). Whatever cannot be spoken becomes a
+    // space, so the sentence keeps its shape instead of running together.
+    final clean = text
+        .replaceAll(_unspeakable, ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
     if (clean.isEmpty) throw const LocalTtsError('nothing to say');
     final audio = _tts.generate(text: clean, sid: sid, speed: speed);
     if (audio.samples.isEmpty) throw const LocalTtsError('empty');

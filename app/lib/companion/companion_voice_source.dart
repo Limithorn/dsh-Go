@@ -17,13 +17,14 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../speech/deepseek_speech.dart';
+import '../speech/edge_tts.dart';
 import '../speech/local_tts.dart';
 
 /// The order the voice page lists them in. [deepseek] is DeepSeek's own speech
 /// API, paid by the signed-in account or the API key (deepseek_speech.dart).
 /// [local] is the Kokoro pack on the phone itself (local_tts.dart): nothing
 /// leaves the device and nothing is paid per character.
-enum CompanionVoiceSource { deepseek, system, preset, openai, custom, local }
+enum CompanionVoiceSource { deepseek, system, preset, openai, custom, local, edge }
 
 /// Her style, for services that take one, when the person hasn't written their own.
 const companionVoiceStyleDefault = '用自然、温柔、带一点俏皮的少女语气说，像在陪朋友聊天。';
@@ -201,6 +202,7 @@ class CompanionVoiceSettings {
     this.openaiVoice = 'alloy',
     this.openaiInstructions = '',
     this.localVoice = LocalTtsPack.chineseFemale,
+    this.edgeVoice = edgeDefaultVoice,
     this.customUrl = '',
     this.customPost = true,
     this.customHeaders = '',
@@ -241,6 +243,9 @@ class CompanionVoiceSettings {
   /// Which voice of the pack on the phone (Kokoro's sid; 6 is zf_xiaoyi).
   final int localVoice;
 
+  /// Which Edge voice (see edgeVoices).
+  final String edgeVoice;
+
   /// How to speak, for models that take it (gpt-4o-mini-tts). Not stored: presets set it.
   final String openaiInstructions;
   final String customUrl;
@@ -274,6 +279,8 @@ class CompanionVoiceSettings {
     CompanionVoiceSource.deepseek || CompanionVoiceSource.system => true,
     // Whether the pack is on the phone is answered when asking (local_tts.dart).
     CompanionVoiceSource.local => true,
+    // Free, no key; whether it answers is known when asking (edge_tts.dart).
+    CompanionVoiceSource.edge => true,
     CompanionVoiceSource.preset =>
       presetKey.trim().isNotEmpty && (cloning ? cloneSample.isNotEmpty : presetVoice.trim().isNotEmpty),
     CompanionVoiceSource.openai => openaiBase.trim().isNotEmpty && openaiVoice.trim().isNotEmpty,
@@ -297,6 +304,7 @@ class CompanionVoiceSettings {
     String? openaiVoice,
     String? openaiInstructions,
     int? localVoice,
+    String? edgeVoice,
     String? customUrl,
     bool? customPost,
     String? customHeaders,
@@ -319,6 +327,7 @@ class CompanionVoiceSettings {
     openaiVoice: openaiVoice ?? this.openaiVoice,
     openaiInstructions: openaiInstructions ?? this.openaiInstructions,
     localVoice: localVoice ?? this.localVoice,
+    edgeVoice: edgeVoice ?? this.edgeVoice,
     customUrl: customUrl ?? this.customUrl,
     customPost: customPost ?? this.customPost,
     customHeaders: customHeaders ?? this.customHeaders,
@@ -340,6 +349,7 @@ class CompanionVoiceSettings {
     'openaiModel': openaiModel,
     'openaiVoice': openaiVoice,
     'localVoice': localVoice,
+    'edgeVoice': edgeVoice,
     'customUrl': customUrl,
     'customPost': customPost,
     'customBody': customBody,
@@ -376,6 +386,7 @@ class CompanionVoiceSettings {
       openaiModel: text('openaiModel', d.openaiModel),
       openaiVoice: text('openaiVoice', d.openaiVoice),
       localVoice: map['localVoice'] is int ? map['localVoice'] as int : d.localVoice,
+      edgeVoice: text('edgeVoice', d.edgeVoice),
       customUrl: text('customUrl', d.customUrl),
       customPost: map['customPost'] is bool ? map['customPost'] as bool : d.customPost,
       customBody: text('customBody', d.customBody),
@@ -544,6 +555,7 @@ Future<CompanionVoiceAudio> fetchCompanionVoice(
 }) async {
   if (settings.source == CompanionVoiceSource.deepseek) return _deepseek(settings, text, deepseek, timeout);
   if (settings.source == CompanionVoiceSource.local) return _local(settings, text);
+  if (settings.source == CompanionVoiceSource.edge) return _edge(settings, text, timeout);
   if (settings.cloning) {
     final voice = await companionCloneVoice(settings.cloneSample);
     settings = settings.copyWith(presetVoices: {...settings.presetVoices, settings.preset: voice});
@@ -569,6 +581,7 @@ Future<CompanionVoiceAudio> fetchCompanionVoice(
       ),
       CompanionVoiceSource.custom => _custom(settings, text, client),
       CompanionVoiceSource.local ||
+      CompanionVoiceSource.edge ||
       CompanionVoiceSource.deepseek ||
       CompanionVoiceSource.system ||
       CompanionVoiceSource.preset => throw const CompanionVoiceError('system voice is not fetched'),
@@ -594,6 +607,20 @@ Future<CompanionVoiceAudio> fetchCompanionVoice(
   }
   if (bytes.isEmpty) throw const CompanionVoiceError('empty reply');
   return CompanionVoiceAudio(bytes, kind);
+}
+
+/// One sentence from the Edge service (edge_tts.dart).
+Future<CompanionVoiceAudio> _edge(CompanionVoiceSettings settings, String text, Duration timeout) async {
+  try {
+    return CompanionVoiceAudio(
+      await edgeSpeak(text, voice: settings.edgeVoice, timeout: timeout),
+      'mp3',
+    );
+  } on EdgeTtsError catch (error) {
+    throw CompanionVoiceError('edge ${error.reason}');
+  } on Object catch (error) {
+    throw CompanionVoiceError('edge $error');
+  }
 }
 
 /// The pack on the phone, loaded once and kept: opening it reads 109 MB.

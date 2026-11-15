@@ -5633,6 +5633,12 @@ class L10nZh extends L10n {
   String get companionVoiceLocalRemove => '删除模型';
 
   @override
+  String get companionVoiceEdge => 'Edge 云端（微软）';
+
+  @override
+  String get companionVoiceEdgeHint => '微软 Edge 朗读的那套声音，不用 key、不花钱，要联网';
+
+  @override
   String get companionVoiceCustomHint => '别的接口：自己填请求和返回的格式';
 
   @override
