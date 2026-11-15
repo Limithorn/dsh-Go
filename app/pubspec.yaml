@@ -155,6 +155,9 @@ flutter:
           weight: 700
 
   assets:
+    # 唤醒词模型（sherpa-onnx zipformer KWS，int8 约 4.8 MB），
+    # 第一次开启唤醒时复制到应用目录（lib/speech/wake_word.dart）。
+    - assets/wake/
     - assets/licenses/streaming-asr-model-APACHE-2.0.txt
     # Full upstream WebRTC Android release notices, shown by LicenseRegistry.
     - assets/licenses/webrtc-150.7871.04.md

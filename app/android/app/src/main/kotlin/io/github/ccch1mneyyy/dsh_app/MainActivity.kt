@@ -76,6 +76,7 @@ class MainActivity : FlutterActivity() {
             engine.plugins.add(io.github.ccch1mneyyy.dsh_app.launch.LaunchClipPlugin())
             engine.plugins.add(io.github.ccch1mneyyy.dsh_app.icons.PictureShortcutPlugin())
             engine.plugins.add(io.github.ccch1mneyyy.dsh_app.usage.UsagePlugin())
+        engine.plugins.add(io.github.ccch1mneyyy.dsh_app.wake.WakePlugin())
             engine.plugins.add(io.github.ccch1mneyyy.dsh_app.companion.CompanionVoicePlugin())
             engine.plugins.add(io.github.ccch1mneyyy.dsh_app.speech.SpeechPlugin())
             engine.plugins.add(io.github.ccch1mneyyy.dsh_app.companion.CompanionWidgetPlugin())

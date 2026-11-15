@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="wake_channel_name">唤醒词</string>
+    <string name="wake_channel_description">一直开着麦克风，在别处也能听见叫它。</string>
+    <string name="wake_notification_title">在听你叫它</string>
+    <string name="wake_notification_text">说「你好米」开始通话。点一下回到 App。</string>
+</resources>

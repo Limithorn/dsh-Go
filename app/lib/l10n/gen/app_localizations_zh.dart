@@ -20338,6 +20338,30 @@ class L10nZh extends L10n {
   String get speechInsecure => '这个云端服务的地址不是 https，Key 不能这样发出去';
 
   @override
+  String get wakeSectionTitle => '唤醒词';
+
+  @override
+  String get wakeToggle => '叫它就醒来';
+
+  @override
+  String get wakeToggleHint => '说「你好米」直接开始通话';
+
+  @override
+  String get wakeToggleOn => '在听你叫它';
+
+  @override
+  String get wakeSectionFooter => '开着的时候麦克风一直占着，通知栏会有一条提示。后台能听声音，是因为挂了一条麦克风类型的前台服务；关掉就停。';
+
+  @override
+  String get wakeProblemMicBusy => '麦克风被别的应用占着';
+
+  @override
+  String get wakeProblemModel => '唤醒模型没能载入';
+
+  @override
+  String get wakeProblemService => '系统不让它在后台开麦克风';
+
+  @override
   String starPromptTitle(int hours) {
     String _temp0 = intl.Intl.pluralLogic(
       hours,

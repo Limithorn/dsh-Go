@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-feature android:name="android.hardware.location" android:required="false" />
     <uses-feature android:name="android.hardware.location.network" android:required="false" />
+    <!-- 唤醒: a microphone-type foreground service is what makes background listening legal. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- The live activity (notify/LiveActivity.kt): Android 16 QPR1+ promotes it to a Live Update.
          Normal, granted at install; older systems skip a permission they don't define. -->
@@ -262,6 +264,13 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Runs the user's local DeepSeek Harness agent server" />
         </service>
+
+        <!-- 唤醒词 (wake/WakeWordService.kt): the microphone foreground service that keeps
+             listening legal while the app is in the background; off until the person turns it on. -->
+        <service
+            android:name=".wake.WakeWordService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <!-- Keeps the floating pet's process up when only remote hosts are used (pet/PetOverlayService.kt). -->
         <service

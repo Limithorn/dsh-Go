@@ -14,6 +14,7 @@ import 'l10n/l10n.dart';
 import 'performance/performance_state.dart';
 import 'performance/refresh_rate.dart';
 import 'state/app_info.dart';
+import 'state/app_navigation.dart';
 import 'state/appearance_state.dart';
 import 'state/locale_state.dart';
 import 'state/star_prompt.dart' show starPromptGateProvider, starPromptProvider;
@@ -226,6 +227,8 @@ class _DshAppState extends ConsumerState<DshApp> with WidgetsBindingObserver {
     return MaterialApp(
       title: AppInfo.name,
       debugShowCheckedModeBanner: false,
+      // 唤醒词命中的时候人可能不在 App 里，通话页要靠这把钥匙推上来。
+      navigatorKey: rootNavigatorKey,
       theme: _light,
       darkTheme: _dark,
       themeMode: themeMode,

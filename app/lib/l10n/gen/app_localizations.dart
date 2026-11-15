@@ -37410,6 +37410,54 @@ abstract class L10n {
   /// **'这个云端服务的地址不是 https，Key 不能这样发出去'**
   String get speechInsecure;
 
+  /// No description provided for @wakeSectionTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'唤醒词'**
+  String get wakeSectionTitle;
+
+  /// No description provided for @wakeToggle.
+  ///
+  /// In zh, this message translates to:
+  /// **'叫它就醒来'**
+  String get wakeToggle;
+
+  /// No description provided for @wakeToggleHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'说「你好米」直接开始通话'**
+  String get wakeToggleHint;
+
+  /// No description provided for @wakeToggleOn.
+  ///
+  /// In zh, this message translates to:
+  /// **'在听你叫它'**
+  String get wakeToggleOn;
+
+  /// No description provided for @wakeSectionFooter.
+  ///
+  /// In zh, this message translates to:
+  /// **'开着的时候麦克风一直占着，通知栏会有一条提示。后台能听声音，是因为挂了一条麦克风类型的前台服务；关掉就停。'**
+  String get wakeSectionFooter;
+
+  /// No description provided for @wakeProblemMicBusy.
+  ///
+  /// In zh, this message translates to:
+  /// **'麦克风被别的应用占着'**
+  String get wakeProblemMicBusy;
+
+  /// No description provided for @wakeProblemModel.
+  ///
+  /// In zh, this message translates to:
+  /// **'唤醒模型没能载入'**
+  String get wakeProblemModel;
+
+  /// No description provided for @wakeProblemService.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统不让它在后台开麦克风'**
+  String get wakeProblemService;
+
   /// The star prompt's first line. hours is the whole hours of use so far, rounded down; 0 is half an hour (the first ask comes after 30 minutes). The word joiner keeps the ~ on the line of the word before it.
   ///
   /// In zh, this message translates to:
