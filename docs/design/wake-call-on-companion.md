@@ -163,6 +163,33 @@ Riverpod 拒绝（`Tried to modify a provider...`），并连带把整页构建�
 
 ## 7. 分期
 
+**进度（2026-11-16 凌晨）**：离线语音已完成并真机可用；浮窗与唤醒未开始。
+
+### 已完成：离线语音（不在原计划里，先做了）
+
+`speech/local_tts.dart`。Kokoro 多语言未量化模型（`kokoro-multi-lang-v1_0`，350 MB
+tar.bz2，解开 383 MB），下载 → SHA-256 → `Isolate.run` 解 bz2/tar → 装进 App 私有目录。
+`CompanionVoiceSource` 多一个 `local`，`fetchCompanionVoice` 多一条分支。
+
+试出来的几条：
+
+- 音色 sid：0–27 英文，**45 zf_xiaobei / 46 zf_xiaoni / 47 zf_xiaoxiao / 48 zf_xiaoyi**，49–52 普通男声。
+  3 和 6 是 af_heart 与 af_nicole，用它们念中文就是「外国人念中文」。
+- 必须传两份 lexicon（英中，逗号分隔）并设 `lang: 'zh'`，否则走英文音素。
+- 用 `model.onnx` 不用 `model.int8.onnx`：量化版省 240 MB，但金属感明显、语气平，
+  24 kHz 采样率本身没问题（用 Python 直接跑同一模型量过，peak 0.3–0.4 无削波）。
+- **合成与加载必须离开 UI isolate**。第一版在主 isolate 上加载 311 MB，真机上通话时
+  连续 ANR，`/data/anr` 里写着 `Waited 5005ms for MotionEvent`。现在整台 TTS 住在一个
+  专用 isolate（`dsh-tts`）里，主 isolate 只发 (id, text, sid, speed)、收回 WAV 字节。
+- App 启动时若选的是本地模型就预热，免得第一句现读模型。
+
+### 还没做
+
+浮窗与唤醒。浮窗的路径改成「页面内收起」而不是「把控制器搬出页面」：
+`openChatCall` 的 route 改成 `opaque: false`，页面加一个收起态，只画一张小卡片，
+通话因此不中断，也不需要动 `VoiceCallController` 的生命周期。等它稳了再谈跨应用。
+
+
 按可独立验证的顺序切，每期都能单独回退。
 
 **第一期：状态解耦，不动窗口。**

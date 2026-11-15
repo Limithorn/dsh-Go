@@ -37218,6 +37218,18 @@ abstract class L10n {
   /// **'挂断'**
   String get speechCallHangUp;
 
+  /// No description provided for @speechCallCollapse.
+  ///
+  /// In zh, this message translates to:
+  /// **'收起通话'**
+  String get speechCallCollapse;
+
+  /// No description provided for @speechCallExpand.
+  ///
+  /// In zh, this message translates to:
+  /// **'展开通话'**
+  String get speechCallExpand;
+
   /// No description provided for @speechCallSpeakerOn.
   ///
   /// In zh, this message translates to:

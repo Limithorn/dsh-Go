@@ -184,166 +184,62 @@ class LocalTtsError implements Exception {
   String toString() => 'LocalTtsError($reason)';
 }
 
-/// One loaded OfflineTts, living in its own isolate.
+/// One loaded OfflineTts, kept until [close]: loading the model takes seconds
+/// and the voice is asked per sentence.
 ///
-/// The UI isolate only talks to it: a request is (text, sid, speed), the answer
-/// is the WAV bytes. Loading happens in the worker's first message, so the
-/// caller waits for it once and never again.
+/// It runs on the isolate that created it. An isolate worker was tried and
+/// aborted the process: sherpa-ng's eSpeak voice setup throws
+/// `Failed to set eSpeak-ng voice` there (`/data/anr` recorded SIGABRT in
+/// DartWorker), so loading stays where the rest of sherpa already lives.
 class LocalTts {
-  LocalTts._(this._requests, this._replies, this._isolate);
+  LocalTts._(this._tts);
 
-  final SendPort _requests;
-  final ReceivePort _replies;
-  final Isolate _isolate;
-  final _pending = <int, Completer<Uint8List>>{};
-  var _next = 0;
-  bool _closed = false;
+  final sherpa.OfflineTts _tts;
 
-  /// Starts the worker and loads the pack at [pack] in it.
+  /// Loads the pack at [pack]; throws when it cannot be loaded.
   static Future<LocalTts> open(Directory pack) async {
-    final replies = ReceivePort();
-    final ready = Completer<SendPort>();
-    final errors = Completer<String>();
-
-    final isolate = await Isolate.spawn(
-      _ttsMain,
-      [replies.sendPort, pack.path],
-      onError: replies.sendPort,
-      onExit: replies.sendPort,
-      debugName: 'dsh-tts',
-    );
-
-    late final LocalTts tts;
-    replies.listen((message) {
-      if (message is SendPort) {
-        if (!ready.isCompleted) ready.complete(message);
-        return;
-      }
-      if (message is List && message.length == 2 && message[0] is int) {
-        final id = message[0] as int;
-        final payload = message[1];
-        final waiter = tts._pending.remove(id);
-        if (payload is Uint8List) {
-          waiter?.complete(payload);
-        } else {
-          waiter?.completeError(LocalTtsError('$payload'));
-        }
-        return;
-      }
-      if (message is String && !errors.isCompleted) {
-        errors.complete(message);
-        return;
-      }
-      // An isolate error arrives as [description, stack]; a load failure as
-      // ['error', description].
-      if (message is List && message.isNotEmpty && !errors.isCompleted) {
-        errors.complete('${message.first}');
-      }
-    });
-
-    final result = await Future.any<Object>([
-      ready.future,
-      errors.future,
-      Future<Object>.delayed(const Duration(seconds: 90), () => 'timeout loading the pack'),
-    ]);
-    if (result is! SendPort) {
-      isolate.kill(priority: Isolate.immediate);
-      replies.close();
-      throw LocalTtsError('$result');
+    try {
+      sherpa.initBindings();
+      return LocalTts._(
+        sherpa.OfflineTts(
+          sherpa.OfflineTtsConfig(
+            model: sherpa.OfflineTtsModelConfig(
+              kokoro: sherpa.OfflineTtsKokoroModelConfig(
+                model: '${pack.path}/${LocalTtsPack.model}',
+                voices: '${pack.path}/${LocalTtsPack.voices}',
+                tokens: '${pack.path}/${LocalTtsPack.tokens}',
+                dataDir: '${pack.path}/${LocalTtsPack.dataDir}',
+                lexicon: '${pack.path}/lexicon-us-en.txt,${pack.path}/${LocalTtsPack.lexicon}',
+                lang: 'zh',
+                lengthScale: 1.0,
+              ),
+              numThreads: 4,
+              debug: false,
+              provider: 'cpu',
+            ),
+          ),
+        ),
+      );
+    } on Object catch (error) {
+      throw LocalTtsError('$error');
     }
-    tts = LocalTts._(result, replies, isolate);
-    return tts;
   }
 
   /// One sentence as a 16-bit mono WAV. [sid] 48 is zf_xiaoyi; the default
   /// tempo is a little above the model's own.
-  Future<Uint8List> speak(String text, {int sid = LocalTtsPack.chineseFemale, double speed = 1.1}) async {
-    if (_closed) throw const LocalTtsError('closed');
-    final id = _next++;
-    final done = Completer<Uint8List>();
-    _pending[id] = done;
-    _requests.send([id, text, sid, speed]);
-    try {
-      return await done.future.timeout(const Duration(minutes: 2));
-    } on TimeoutException {
-      _pending.remove(id);
-      throw const LocalTtsError('timeout speaking');
-    }
+  Uint8List speak(String text, {int sid = LocalTtsPack.chineseFemale, double speed = 1.1}) {
+    final audio = _tts.generate(text: text, sid: sid, speed: speed);
+    if (audio.samples.isEmpty) throw const LocalTtsError('empty');
+    return wavOf(audio.samples, audio.sampleRate);
   }
 
   void close() {
-    if (_closed) return;
-    _closed = true;
-    _requests.send(const ['close']);
-    _isolate.kill(priority: Isolate.beforeNextEvent);
-    _replies.close();
-    for (final waiter in _pending.values) {
-      if (!waiter.isCompleted) waiter.completeError(const LocalTtsError('closed'));
-    }
-    _pending.clear();
-  }
-}
-
-/// The worker: load once, then answer (id, text, sid, speed) with (id, WAV).
-@pragma('vm:entry-point')
-void _ttsMain(List args) {
-  final replies = args[0] as SendPort;
-  final path = args[1] as String;
-  final inbox = ReceivePort();
-  replies.send(inbox.sendPort);
-  sherpa.OfflineTts? tts;
-  try {
-    sherpa.initBindings();
-    tts = sherpa.OfflineTts(
-      sherpa.OfflineTtsConfig(
-        model: sherpa.OfflineTtsModelConfig(
-          kokoro: sherpa.OfflineTtsKokoroModelConfig(
-            model: '$path/${LocalTtsPack.model}',
-            voices: '$path/${LocalTtsPack.voices}',
-            tokens: '$path/${LocalTtsPack.tokens}',
-            dataDir: '$path/${LocalTtsPack.dataDir}',
-            lexicon: '$path/lexicon-us-en.txt,$path/${LocalTtsPack.lexicon}',
-            lang: 'zh',
-            lengthScale: 1.0,
-          ),
-          numThreads: 4,
-          debug: false,
-          provider: 'cpu',
-        ),
-      ),
-    );
-  } on Object catch (error) {
-    replies.send('load $error');
-    inbox.close();
-    return;
-  }
-
-  inbox.listen((message) {
-    if (message is List && message.isNotEmpty && message[0] == 'close') {
-      try {
-        tts?.free();
-      } on Object {
-        // Already gone.
-      }
-      inbox.close();
-      return;
-    }
-    if (message is! List || message.length != 4) return;
-    final id = message[0] as int;
-    final text = message[1] as String;
-    final sid = message[2] as int;
-    final speed = message[3] as double;
     try {
-      final audio = tts!.generate(text: text, sid: sid, speed: speed);
-      if (audio.samples.isEmpty) {
-        replies.send([id, 'empty']);
-        return;
-      }
-      replies.send([id, wavOf(audio.samples, audio.sampleRate)]);
-    } on Object catch (error) {
-      replies.send([id, 'speak $error']);
+      _tts.free();
+    } on Object {
+      // Already gone.
     }
-  });
+  }
 }
 
 /// Float samples (-1..1) as a 16-bit PCM WAV.

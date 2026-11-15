@@ -623,7 +623,7 @@ Future<CompanionVoiceAudio> _local(CompanionVoiceSettings settings, String text)
       if (pack == null) throw const CompanionVoiceError('local model is not installed');
       tts = _localTts = await LocalTts.open(pack);
     }
-    return CompanionVoiceAudio(await tts.speak(text, sid: settings.localVoice), 'wav');
+    return CompanionVoiceAudio(tts.speak(text, sid: settings.localVoice), 'wav');
   } on CompanionVoiceError {
     rethrow;
   } on Object catch (error) {
