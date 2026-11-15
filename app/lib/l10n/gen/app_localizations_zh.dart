@@ -5591,6 +5591,27 @@ class L10nZh extends L10n {
   String get companionVoiceCustom => '自定义 HTTP';
 
   @override
+  String get companionVoiceLocal => '本地模型（Kokoro）';
+
+  @override
+  String get companionVoiceLocalHint => '全离线，不联网也不按字数花钱；要先下载模型';
+
+  @override
+  String get companionVoiceLocalNote => '下载后完全离线：不联网、不按字数花钱。首次合成要加载一百多 MB 的模型，会慢几秒';
+
+  @override
+  String get companionVoiceLocalDownload => '下载模型';
+
+  @override
+  String get companionVoiceLocalReady => '模型已就绪';
+
+  @override
+  String get companionVoiceLocalSize => '约 334 MB，只下一次';
+
+  @override
+  String get companionVoiceLocalRemove => '删除模型';
+
+  @override
   String get companionVoiceCustomHint => '别的接口：自己填请求和返回的格式';
 
   @override

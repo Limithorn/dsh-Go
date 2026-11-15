@@ -41,6 +41,7 @@ String speechVoiceLabel(L10n l10n, CompanionVoiceSettings? voice) => switch (voi
   CompanionVoiceSettings(source: CompanionVoiceSource.preset) => voice.presetInfo.name,
   CompanionVoiceSettings(source: CompanionVoiceSource.openai) => l10n.companionVoiceOpenai,
   CompanionVoiceSettings(source: CompanionVoiceSource.custom) => l10n.companionVoiceCustom,
+  CompanionVoiceSettings(source: CompanionVoiceSource.local) => l10n.companionVoiceLocal,
 };
 
 /// The model's name as its authors write it (not translated).

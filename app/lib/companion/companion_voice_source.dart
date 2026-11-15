@@ -17,10 +17,13 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../speech/deepseek_speech.dart';
+import '../speech/local_tts.dart';
 
 /// The order the voice page lists them in. [deepseek] is DeepSeek's own speech
 /// API, paid by the signed-in account or the API key (deepseek_speech.dart).
-enum CompanionVoiceSource { deepseek, system, preset, openai, custom }
+/// [local] is the Kokoro pack on the phone itself (local_tts.dart): nothing
+/// leaves the device and nothing is paid per character.
+enum CompanionVoiceSource { deepseek, system, preset, openai, custom, local }
 
 /// Her style, for services that take one, when the person hasn't written their own.
 const companionVoiceStyleDefault = '用自然、温柔、带一点俏皮的少女语气说，像在陪朋友聊天。';
@@ -197,6 +200,7 @@ class CompanionVoiceSettings {
     this.openaiModel = 'gpt-4o-mini-tts',
     this.openaiVoice = 'alloy',
     this.openaiInstructions = '',
+    this.localVoice = LocalTtsPack.chineseFemale,
     this.customUrl = '',
     this.customPost = true,
     this.customHeaders = '',
@@ -234,6 +238,9 @@ class CompanionVoiceSettings {
   final String openaiModel;
   final String openaiVoice;
 
+  /// Which voice of the pack on the phone (Kokoro's sid; 6 is zf_xiaoyi).
+  final int localVoice;
+
   /// How to speak, for models that take it (gpt-4o-mini-tts). Not stored: presets set it.
   final String openaiInstructions;
   final String customUrl;
@@ -265,6 +272,8 @@ class CompanionVoiceSettings {
   bool get configured => switch (source) {
     // Who pays is only known when asking (deepseek_speech.dart).
     CompanionVoiceSource.deepseek || CompanionVoiceSource.system => true,
+    // Whether the pack is on the phone is answered when asking (local_tts.dart).
+    CompanionVoiceSource.local => true,
     CompanionVoiceSource.preset =>
       presetKey.trim().isNotEmpty && (cloning ? cloneSample.isNotEmpty : presetVoice.trim().isNotEmpty),
     CompanionVoiceSource.openai => openaiBase.trim().isNotEmpty && openaiVoice.trim().isNotEmpty,
@@ -287,6 +296,7 @@ class CompanionVoiceSettings {
     String? openaiModel,
     String? openaiVoice,
     String? openaiInstructions,
+    int? localVoice,
     String? customUrl,
     bool? customPost,
     String? customHeaders,
@@ -308,6 +318,7 @@ class CompanionVoiceSettings {
     openaiModel: openaiModel ?? this.openaiModel,
     openaiVoice: openaiVoice ?? this.openaiVoice,
     openaiInstructions: openaiInstructions ?? this.openaiInstructions,
+    localVoice: localVoice ?? this.localVoice,
     customUrl: customUrl ?? this.customUrl,
     customPost: customPost ?? this.customPost,
     customHeaders: customHeaders ?? this.customHeaders,
@@ -530,6 +541,7 @@ Future<CompanionVoiceAudio> fetchCompanionVoice(
   DeepSeekSpeechResolver? deepseek,
 }) async {
   if (settings.source == CompanionVoiceSource.deepseek) return _deepseek(settings, text, deepseek, timeout);
+  if (settings.source == CompanionVoiceSource.local) return _local(settings, text);
   if (settings.cloning) {
     final voice = await companionCloneVoice(settings.cloneSample);
     settings = settings.copyWith(presetVoices: {...settings.presetVoices, settings.preset: voice});
@@ -554,6 +566,7 @@ Future<CompanionVoiceAudio> fetchCompanionVoice(
         }),
       ),
       CompanionVoiceSource.custom => _custom(settings, text, client),
+      CompanionVoiceSource.local ||
       CompanionVoiceSource.deepseek ||
       CompanionVoiceSource.system ||
       CompanionVoiceSource.preset => throw const CompanionVoiceError('system voice is not fetched'),
@@ -579,6 +592,41 @@ Future<CompanionVoiceAudio> fetchCompanionVoice(
   }
   if (bytes.isEmpty) throw const CompanionVoiceError('empty reply');
   return CompanionVoiceAudio(bytes, kind);
+}
+
+/// The pack on the phone, loaded once and kept: opening it reads 109 MB.
+LocalTts? _localTts;
+
+/// Loads the pack before it is needed, when it is the chosen voice.
+///
+/// Called once as the app starts (app.dart). Failing here is silent: the first
+/// real sentence reports the reason where it can be read.
+Future<void> warmLocalTts() async {
+  if (_localTts != null) return;
+  try {
+    final pack = await localTtsInstalled();
+    if (pack == null) return;
+    _localTts = await LocalTts.open(pack);
+  } on Object {
+    // See above.
+  }
+}
+
+/// One sentence from the Kokoro pack on the phone (local_tts.dart).
+Future<CompanionVoiceAudio> _local(CompanionVoiceSettings settings, String text) async {
+  try {
+    var tts = _localTts;
+    if (tts == null) {
+      final pack = await localTtsInstalled();
+      if (pack == null) throw const CompanionVoiceError('local model is not installed');
+      tts = _localTts = await LocalTts.open(pack);
+    }
+    return CompanionVoiceAudio(tts.speak(text, sid: settings.localVoice), 'wav');
+  } on CompanionVoiceError {
+    rethrow;
+  } on Object catch (error) {
+    throw CompanionVoiceError('local $error');
+  }
 }
 
 /// One sentence from DeepSeek, as a WAV (her mouth reads its loudness).
