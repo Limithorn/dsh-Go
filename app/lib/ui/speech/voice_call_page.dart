@@ -32,6 +32,7 @@ import '../../speech/speech_settings.dart';
 import '../../speech/voice_cloud.dart';
 import '../../state/account_state.dart';
 import '../../state/app_notes.dart';
+import '../../state/call_surface_state.dart';
 import '../../state/notify_state.dart';
 import '../../state/voice_settings.dart';
 import '../../state/voice_state.dart';
@@ -62,6 +63,10 @@ Future<void> openChatCall(
 }) async {
   final container = ProviderScope.containerOf(context, listen: false);
   container.read(readAloudProvider.notifier).stop();
+  // The call is shown whole while this page is up (state/call_surface_state.dart).
+  // Set here, not in the page's own lifecycle: a provider is not to be written
+  // from a widget that is being disposed.
+  container.read(callSurfaceProvider.notifier).set(CallSurface.full);
   await Navigator.of(context).push(
     PageRouteBuilder<void>(
       opaque: true,
@@ -81,6 +86,7 @@ Future<void> openChatCall(
   );
   // Off the call: its conversation is no longer the one being heard (ChatCallConversation set it).
   container.read(callChatProvider.notifier).set(null);
+  container.read(callSurfaceProvider.notifier).set(CallSurface.none);
 }
 
 class VoiceCallPage extends ConsumerStatefulWidget {
