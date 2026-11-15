@@ -20160,6 +20160,31 @@ class L10nEn extends L10n {
   String get speechInsecure => 'That service\'s address isn\'t https; the key can\'t be sent that way';
 
   @override
+  String get wakeSectionTitle => 'Wake word';
+
+  @override
+  String get wakeToggle => 'Wake it by name';
+
+  @override
+  String get wakeToggleHint => 'Say 你好米 to start a call';
+
+  @override
+  String get wakeToggleOn => 'Listening for your name';
+
+  @override
+  String get wakeSectionFooter =>
+      'While this is on the microphone stays open and a notification stays in the shade. Listening in the background needs a microphone-type foreground service; turning it off stops it.';
+
+  @override
+  String get wakeProblemMicBusy => 'Another app is holding the microphone';
+
+  @override
+  String get wakeProblemModel => 'The wake model could not be loaded';
+
+  @override
+  String get wakeProblemService => 'The system refused the microphone in the background';
+
+  @override
   String starPromptTitle(int hours) {
     String _temp0 = intl.Intl.pluralLogic(
       hours,

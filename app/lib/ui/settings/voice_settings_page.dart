@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../companion/companion_voice_source.dart';
 import '../../l10n/l10n.dart';
+import '../../state/wake_state.dart';
 import '../../speech/speech_audio.dart';
 import '../../speech/speech_settings.dart';
 import '../../state/android_features.dart';
@@ -133,6 +134,7 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
     final ohos = ref.watch(operatingSystemProvider) == 'ohos';
     final languages = ohos ? ref.watch(voiceCapabilitiesProvider).value?.languages : null;
     final chineseOnly = languages != null && languages.isNotEmpty && languages.every((l) => l.startsWith('zh'));
+    final wake = ref.watch(wakeProvider);
     final call = ref.watch(callSettingsProvider);
     final calls = ref.read(callSettingsProvider.notifier);
     return AppPage.list(
@@ -151,6 +153,32 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
               onTap: () =>
                   Navigator.of(context)
                       .push(MaterialPageRoute<void>(builder: (_) => const CompanionVoicePage(shared: true))),
+            ),
+          ],
+        ),
+        SettingsSection(
+          title: l10n.wakeSectionTitle,
+          footer: Text(l10n.wakeSectionFooter),
+          children: [
+            SettingsTile(
+              key: const ValueKey('wake-toggle'),
+              title: l10n.wakeToggle,
+              subtitle: switch (wake.problem) {
+                'mic_busy' || 'mic_unavailable' => l10n.wakeProblemMicBusy,
+                'model_unavailable' => l10n.wakeProblemModel,
+                'service_refused' => l10n.wakeProblemService,
+                _ => wake.enabled ? l10n.wakeToggleOn : l10n.wakeToggleHint,
+              },
+              trailing: wake.loading
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Switch(
+                      value: wake.enabled,
+                      onChanged: (on) => unawaited(ref.read(wakeProvider.notifier).setEnabled(on)),
+                    ),
+              onTap: () => unawaited(ref.read(wakeProvider.notifier).setEnabled(!wake.enabled)),
             ),
           ],
         ),

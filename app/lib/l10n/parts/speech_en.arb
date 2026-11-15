@@ -137,5 +137,13 @@
   "speechCallVisualRing": "Ring",
   "speechCallVisualMono": "Line",
   "speechCallVisualGlass": "Orb",
-  "speechInsecure": "That service's address isn't https; the key can't be sent that way"
+  "speechInsecure": "That service's address isn't https; the key can't be sent that way",
+  "wakeSectionTitle": "Wake word",
+  "wakeToggle": "Wake it by name",
+  "wakeToggleHint": "Say 你好米 to start a call",
+  "wakeToggleOn": "Listening for your name",
+  "wakeSectionFooter": "While this is on the microphone stays open and a notification stays in the shade. Listening in the background needs a microphone-type foreground service; turning it off stops it.",
+  "wakeProblemMicBusy": "Another app is holding the microphone",
+  "wakeProblemModel": "The wake model could not be loaded",
+  "wakeProblemService": "The system refused the microphone in the background"
 }
