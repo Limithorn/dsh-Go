@@ -10424,6 +10424,18 @@ abstract class L10n {
   /// **'删除模型'**
   String get companionVoiceLocalRemove;
 
+  /// No description provided for @companionVoiceEdge.
+  ///
+  /// In zh, this message translates to:
+  /// **'Edge 云端（微软）'**
+  String get companionVoiceEdge;
+
+  /// No description provided for @companionVoiceEdgeHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'微软 Edge 朗读的那套声音，不用 key、不花钱，要联网'**
+  String get companionVoiceEdgeHint;
+
   /// No description provided for @companionVoiceCustomHint.
   ///
   /// In zh, this message translates to:

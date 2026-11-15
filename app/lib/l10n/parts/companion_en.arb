@@ -194,6 +194,8 @@
   "companionVoiceLocalReady": "Model ready",
   "companionVoiceLocalSize": "About 334 MB, downloaded once",
   "companionVoiceLocalRemove": "Delete the model",
+  "companionVoiceEdge": "Edge online (Microsoft)",
+  "companionVoiceEdgeHint": "The voices behind Edge's read-aloud: no key, no charge, needs a network",
   "companionVoiceCustomHint": "Anything else: describe the request and the reply",
   "companionVoiceApi": "API",
   "companionVoiceBase": "Address",

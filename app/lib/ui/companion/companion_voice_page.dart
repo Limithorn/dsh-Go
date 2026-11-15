@@ -454,6 +454,7 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
                 (CompanionVoiceSource.openai, l10n.companionVoiceOpenai, l10n.companionVoiceOpenaiHint),
                 (CompanionVoiceSource.custom, l10n.companionVoiceCustom, l10n.companionVoiceCustomHint),
                 (CompanionVoiceSource.local, l10n.companionVoiceLocal, l10n.companionVoiceLocalHint),
+                (CompanionVoiceSource.edge, l10n.companionVoiceEdge, l10n.companionVoiceEdgeHint),
               ],
             ])
               SettingsTile(

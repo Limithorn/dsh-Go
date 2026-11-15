@@ -5959,6 +5959,12 @@ class L10nEn extends L10n {
   String get companionVoiceLocalRemove => 'Delete the model';
 
   @override
+  String get companionVoiceEdge => 'Edge online (Microsoft)';
+
+  @override
+  String get companionVoiceEdgeHint => 'The voices behind Edge\'s read-aloud: no key, no charge, needs a network';
+
+  @override
   String get companionVoiceCustomHint => 'Anything else: describe the request and the reply';
 
   @override
