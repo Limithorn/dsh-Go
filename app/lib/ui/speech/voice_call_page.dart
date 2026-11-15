@@ -381,11 +381,14 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
           child: GestureDetector(
             // The card itself moves; the keys on it still take their taps.
             onPanUpdate: (details) {
-              final next = _cardDrag + details.delta;
+              // Kept inside the screen: a card dragged past the edge cannot be
+              // found again, which is why it moved once and then stopped.
+              final half = screen.width / 2 - 150;
+              final up = screen.height - 180;
               setState(() {
                 _cardDrag = Offset(
-                  next.dx.clamp(-screen.width + 200, screen.width - 200),
-                  next.dy.clamp(-screen.height + 200, screen.height / 2),
+                  (_cardDrag.dx + details.delta.dx).clamp(-half, half),
+                  (_cardDrag.dy + details.delta.dy).clamp(-up, 0),
                 );
               });
             },
