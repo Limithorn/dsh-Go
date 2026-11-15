@@ -228,13 +228,7 @@ class LocalTts {
   /// One sentence as a 16-bit mono WAV. [sid] 48 is zf_xiaoyi; the default
   /// tempo is a little above the model's own.
   Uint8List speak(String text, {int sid = LocalTtsPack.chineseFemale, double speed = 1.1}) {
-    // eSpeak aborts the whole process on characters it has no phonemes for
-    // (`Failed to set eSpeak-ng voice`). Whatever cannot be spoken becomes a
-    // space, so the sentence keeps its shape instead of running together.
-    final clean = text
-        .replaceAll(_unspeakable, ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
+    final clean = speakableForTts(text);
     if (clean.isEmpty) throw const LocalTtsError('nothing to say');
     final audio = _tts.generate(text: clean, sid: sid, speed: speed);
     if (audio.samples.isEmpty) throw const LocalTtsError('empty');
@@ -250,13 +244,26 @@ class LocalTts {
   }
 }
 
-/// What a sentence is allowed to keep: letters, digits, whitespace and the
-/// punctuation that shapes a spoken line. Everything else (emoji, arrows,
-/// box drawing, control codes) is what makes eSpeak abort.
-final _unspeakable = RegExp(
-  r'[^\p{L}\p{N}\s，。！？；：、,.!?;:\u201c\u201d\u2018\u2019\u2014\u2013\-\(\)\[\]\u3001\u300a\u300b]',
-  unicode: true,
-);
+/// What actually reaches eSpeak: letters, digits, spaces, and two marks only —
+/// the full stop and the comma.
+///
+/// The narrow set is deliberate. eSpeak picks its voice from what it is given
+/// and aborts the process when it cannot (`Failed to set eSpeak-ng voice`), so
+/// every other mark — English period and comma included — becomes a Chinese
+/// comma, and runs of them collapse into one. The result reads slightly flatter
+/// than the original, and never kills the app.
+String speakableForTts(String text) {
+  final normalized = text.replaceAll('.', '。').replaceAll(',', '，');
+  var kept = normalized.replaceAll(RegExp(r'[^\p{L}\p{N}\s，。]', unicode: true), '，');
+  // Two marks side by side is what confused eSpeak: collapse every run of
+  // commas or spaces into one comma, and never let a comma sit next to a full
+  // stop.
+  kept = kept.replaceAll(RegExp(r'[\s，]*，[\s，]*'), '，');
+  kept = kept.replaceAll(RegExp(r'[\s。]*。[\s。]*'), '。');
+  kept = kept.replaceAll(RegExp(r'，。+'), '。');
+  kept = kept.replaceAll(RegExp(r'。，+'), '。');
+  return kept.replaceAll(RegExp(r'\s+'), ' ').trim();
+}
 
 /// Float samples (-1..1) as a 16-bit PCM WAV.
 Uint8List wavOf(Float32List samples, int sampleRate) {
