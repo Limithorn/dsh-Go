@@ -15,8 +15,13 @@ import '../../companion/companion_adapt.dart';
 import '../../companion/companion_moves.dart';
 import '../../companion/companion_pack.dart';
 import '../../companion/companion_server.dart';
+import '../../companion/companion_stage_commands.dart';
 import '../plugins/islands/island_platform.dart';
 import '../web/web_view_guard.dart';
+
+// The controller and the events live in companion/ so non-UI code can hold them;
+// re-exported here so every existing import of this file keeps working.
+export '../../companion/companion_stage_commands.dart';
 
 /// Phones with less memory than this get a smaller texture (4096² is about
 /// 64 MB of GPU memory, more with mipmaps).
@@ -29,59 +34,6 @@ const _bigTextureFromBytes = 5 * 1024 * 1024 * 1024;
 /// person to read; the room has its own words for them.
 const companionStageRendererGone = 'renderer gone';
 const companionStagePackChanged = 'pack changed';
-
-/// Sends commands to the stage; does nothing until it is ready.
-class CompanionStageController {
-  CompanionStageController({this.sink});
-
-  /// Tests watch commands here instead of a WebView.
-  final void Function(String type, Map<String, Object?> args)? sink;
-
-  WebViewController? _web;
-  bool _ready = false;
-
-  void command(String type, [Map<String, Object?> args = const {}]) {
-    sink?.call(type, args);
-    final web = _web;
-    if (web == null || !_ready) return;
-    // Structured and JSON-encoded: nothing from a reply becomes script.
-    unawaited(web.runJavaScript('stage.command(${jsonEncode({'type': type, ...args})})').catchError((Object _) {}));
-  }
-}
-
-/// What the stage tells the page.
-class CompanionStageEvents {
-  const CompanionStageEvents({
-    required this.onReady,
-    required this.onFailed,
-    required this.onTouch,
-    required this.onWake,
-    required this.onMood,
-    required this.onObject,
-    required this.onActivity,
-    this.onModel,
-    this.onProbe,
-  });
-
-  final VoidCallback onReady;
-
-  /// What the model is (stage.js `probeReport`), when it loads and whenever
-  /// an adapter is worn or taken off (companion_adapt.dart).
-  final ValueChanged<CompanionProbe>? onProbe;
-
-  /// What the model brings of its own, as it finishes loading (before [onReady]).
-  final ValueChanged<CompanionModelInfo>? onModel;
-  final ValueChanged<String> onFailed;
-  final void Function(String zone, String kind) onTouch;
-  final VoidCallback onWake;
-  final ValueChanged<String> onMood;
-
-  /// One of her things was tapped: `snack`, `play` or `rest`.
-  final ValueChanged<String> onObject;
-
-  /// What she's doing changed (also when it ran out): `idle` / `snack` / `play` / `rest`.
-  final ValueChanged<String> onActivity;
-}
 
 class CompanionStage extends StatefulWidget {
   const CompanionStage({
@@ -147,7 +99,7 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
   }
 
   void _syncVisibility() {
-    if (!widget.controller._ready) return;
+    if (!widget.controller.isReady) return;
     final pause = !_routeVisible || (_lifecycle != null && _lifecycle != AppLifecycleState.resumed);
     if (_appliedPause == pause) return;
     _appliedPause = pause;
@@ -207,9 +159,9 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
         }
         _webId = id;
       }
+      widget.controller.attach(web);
       setState(() {
         _web = web;
-        widget.controller._web = web;
       });
       _timeout = Timer(_readyTimeout, () => _fail('timeout'));
       await web.loadRequest(
@@ -243,10 +195,8 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
     if (mounted) {
       _generation++;
       _timeout?.cancel();
-      widget.controller
-        .._web = null
-        .._ready = false;
       final id = _webId;
+      widget.controller.detach();
       _webId = null;
       if (_web != null) setState(() => _web = null);
       // Destroyed once the frame without its widget is drawn, as the other
@@ -273,7 +223,7 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
     switch (message['type']) {
       case 'ready':
         _timeout?.cancel();
-        widget.controller._ready = true;
+        widget.controller.markReady();
         _appliedPause = null;
         _syncVisibility();
         // What the model is first: its moves are kept by its fingerprint.
@@ -319,9 +269,7 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
     unawaited(_platformEvents?.cancel());
     _generation++;
     _timeout?.cancel();
-    widget.controller
-      .._web = null
-      .._ready = false;
+    widget.controller.detach();
     // The hook stays until the server has closed: a pack change that races
     // leaving the room waits for the last handler too.
     final unhook = _unhook;
