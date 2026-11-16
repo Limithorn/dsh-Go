@@ -70,8 +70,10 @@ Future<void> openChatCall(
   container.read(callSurfaceProvider.notifier).set(CallSurface.full);
   await Navigator.of(context).push(
     PageRouteBuilder<void>(
-      // Transparent so a call can shrink to a card over the conversation
-      // instead of holding the whole screen (the page paints its own field).
+      // 透明路可以，但不能带 barrier：PageRouteBuilder 的 barrierDismissible
+      // 默认是 true，于是这条透明路由上盖了一层看不见的 ModalBarrier，
+      // 把整屏的点击全部吃掉——收起后点哪都没反应，根子在这里。
+      barrierDismissible: false,
       opaque: false,
       fullscreenDialog: true,
       transitionDuration: AppMotion.of(context, const Duration(milliseconds: 520)),
