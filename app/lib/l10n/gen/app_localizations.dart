@@ -37458,6 +37458,30 @@ abstract class L10n {
   /// **'系统不让它在后台开麦克风'**
   String get wakeProblemService;
 
+  /// No description provided for @wakeSessionTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'叫醒后去哪'**
+  String get wakeSessionTitle;
+
+  /// No description provided for @wakeSessionNew.
+  ///
+  /// In zh, this message translates to:
+  /// **'每回新开一间'**
+  String get wakeSessionNew;
+
+  /// No description provided for @wakeWordTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'唤醒词'**
+  String get wakeWordTitle;
+
+  /// No description provided for @wakeWordHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'填中文，比如 你好肥鱼'**
+  String get wakeWordHint;
+
   /// The star prompt's first line. hours is the whole hours of use so far, rounded down; 0 is half an hour (the first ask comes after 30 minutes). The word joiner keeps the ~ on the line of the word before it.
   ///
   /// In zh, this message translates to:

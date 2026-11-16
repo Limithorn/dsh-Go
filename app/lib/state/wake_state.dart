@@ -6,8 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../speech/wake_word.dart';
+import '../speech/wake_words.dart';
 import '../ui/speech/voice_call_page.dart';
 import 'app_navigation.dart';
+import 'sessions_state.dart';
+import 'wake_binding.dart';
 
 /// 唤醒词的状态：开着没有、模型好没好、刚才被叫了几次。
 class WakeState {
@@ -92,6 +95,8 @@ class WakeController extends Notifier<WakeState> {
       _subscribed = true;
     }
     final dir = await prepareWakeModel(await _modelDir());
+    // 先把人写的那个词写成模型能读的词表（设置里改过就是新的）。
+    await WakeWords.syncTo(dir);
     final loaded = await _engine.load(dir);
     if (!loaded) {
       state = state.copyWith(problem: 'model_unavailable');
@@ -161,7 +166,13 @@ class WakeController extends Notifier<WakeState> {
       await openChatCall(
         context,
         title: word.replaceFirst('@', ''),
-        session: () async => null,
+        // 被叫醒的通话必须有一个真的会话，不然话没地方去：设置里指定了就用那一个，
+        // 没指定就现开一间。之前这里返回 null，结果就是叫醒之后说的话发不出去。
+        session: () async {
+          final bound = await WakeBinding.read();
+          if (bound != null) return bound;
+          return ref.read(sessionsProvider.notifier).create();
+        },
       );
     }
     if (state.enabled) {
@@ -171,3 +182,6 @@ class WakeController extends Notifier<WakeState> {
 }
 
 final wakeProvider = NotifierProvider<WakeController, WakeState>(WakeController.new);
+
+/// 设置页读它显示当前那个词；改完 [WakeWords.write] 之后 invalidate。
+final wakeWordProvider = FutureProvider<String>((ref) => WakeWords.read());

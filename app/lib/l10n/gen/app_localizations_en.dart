@@ -21519,6 +21519,18 @@ class L10nEn extends L10n {
   String get wakeProblemService => 'The system refused the microphone in the background';
 
   @override
+  String get wakeSessionTitle => 'After it wakes';
+
+  @override
+  String get wakeSessionNew => 'A new conversation each time';
+
+  @override
+  String get wakeWordTitle => 'Wake word';
+
+  @override
+  String get wakeWordHint => 'Chinese, e.g. 你好肥鱼';
+
+  @override
   String starPromptTitle(int hours) {
     String _temp0 = intl.Intl.pluralLogic(
       hours,

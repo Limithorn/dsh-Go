@@ -145,5 +145,9 @@
   "wakeSectionFooter": "开着的时候麦克风一直占着，通知栏会有一条提示。后台能听声音，是因为挂了一条麦克风类型的前台服务；关掉就停。",
   "wakeProblemMicBusy": "麦克风被别的应用占着",
   "wakeProblemModel": "唤醒模型没能载入",
-  "wakeProblemService": "系统不让它在后台开麦克风"
+  "wakeProblemService": "系统不让它在后台开麦克风",
+  "wakeSessionTitle": "叫醒后去哪",
+  "wakeSessionNew": "每回新开一间",
+  "wakeWordTitle": "唤醒词",
+  "wakeWordHint": "填中文，比如 你好肥鱼"
 }

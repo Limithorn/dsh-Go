@@ -1,10 +1,16 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:dsh_client/dsh_client.dart' show SessionSummary;
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../companion/companion_voice_source.dart';
 import '../../l10n/l10n.dart';
+import '../../speech/wake_pinyin.dart';
+import '../../speech/wake_words.dart';
+import '../../state/sessions_state.dart';
+import '../../state/wake_binding.dart';
 import '../../state/wake_state.dart';
 import '../../speech/speech_audio.dart';
 import '../../speech/speech_settings.dart';
@@ -116,6 +122,78 @@ class VoiceSettingsPage extends ConsumerStatefulWidget {
 }
 
 class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
+  /// 叫醒之后去哪一间：列出会话，第一项是「每回新开一间」。
+  Future<void> _chooseWakeSession() async {
+    final sessions = ref.read(sessionsProvider).value ?? const <SessionSummary>[];
+    final current = await WakeBinding.read();
+    if (!mounted) return;
+    final picked = await showModalBottomSheet<Object?>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheet) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            ListTile(
+              title: Text(context.l10n.wakeSessionNew),
+              trailing: current == null ? const Icon(AppIcons.selected, size: 20) : null,
+              onTap: () => Navigator.of(sheet).pop('new'),
+            ),
+            for (final session in sessions)
+              ListTile(
+                title: Text(_sessionLabel(session.sessionId)),
+                trailing: current == session.sessionId ? const Icon(AppIcons.selected, size: 20) : null,
+                onTap: () => Navigator.of(sheet).pop(session.sessionId),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    await WakeBinding.write(picked == 'new' ? null : picked as String);
+    ref.invalidate(wakeBindingProvider);
+  }
+
+  String _shortId(String id) => id.length <= 8 ? id : id.substring(0, 8);
+
+  String _sessionLabel(String id) => _shortId(id);
+
+  /// 改唤醒词：只收汉字，其他输入当场滤掉（模型只认读音）。
+  Future<void> _editWakeWord(String current) async {
+    final controller = TextEditingController(text: current);
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: Text(context.l10n.wakeWordTitle),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: InputDecoration(hintText: context.l10n.wakeWordHint),
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'[\u3400-\u4DBF\u4E00-\u9FFF]')),
+            LengthLimitingTextInputFormatter(8),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialog).pop(), child: Text(context.l10n.commonCancel)),
+          TextButton(
+            onPressed: () => Navigator.of(dialog).pop(controller.text.trim()),
+            child: Text(context.l10n.commonSave),
+          ),
+        ],
+      ),
+    );
+    if (picked == null || !mounted) return;
+    final clean = sanitizeWakeWord(picked);
+    await WakeWords.write(clean.isEmpty ? WakeWords.fallback : clean);
+    ref.invalidate(wakeWordProvider);
+    // 正在听的话，换词要重新载入：先停再起，让它读新的词表。
+    if (ref.read(wakeProvider).enabled) {
+      await ref.read(wakeProvider.notifier).stop();
+      await ref.read(wakeProvider.notifier).start();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -135,6 +213,9 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
     final languages = ohos ? ref.watch(voiceCapabilitiesProvider).value?.languages : null;
     final chineseOnly = languages != null && languages.isNotEmpty && languages.every((l) => l.startsWith('zh'));
     final wake = ref.watch(wakeProvider);
+    // 唤醒词与"叫醒后去哪一间"：和唤醒开关同一段设置里。
+    final bound = ref.watch(wakeBindingProvider).value;
+    final word = ref.watch(wakeWordProvider).value ?? WakeWords.fallback;
     final call = ref.watch(callSettingsProvider);
     final calls = ref.read(callSettingsProvider.notifier);
     return AppPage.list(
@@ -179,6 +260,18 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
                       onChanged: (on) => unawaited(ref.read(wakeProvider.notifier).setEnabled(on)),
                     ),
               onTap: () => unawaited(ref.read(wakeProvider.notifier).setEnabled(!wake.enabled)),
+            ),
+            SettingsTile(
+              key: const ValueKey('wake-word'),
+              title: l10n.wakeWordTitle,
+              subtitle: word,
+              onTap: () => unawaited(_editWakeWord(word)),
+            ),
+            SettingsTile(
+              key: const ValueKey('wake-session'),
+              title: l10n.wakeSessionTitle,
+              subtitle: bound == null ? l10n.wakeSessionNew : _sessionLabel(bound),
+              onTap: () => unawaited(_chooseWakeSession()),
             ),
           ],
         ),
