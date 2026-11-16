@@ -29,3 +29,17 @@ Future<bool> enterPictureInPicture() async {
     return false;
   }
 }
+
+/// 告诉原生现在是不是在通话。
+///
+/// 通话中按 home 或切走时，原生会直接缩成小窗，而不是退到后台——
+/// 后台麦克风会被系统掉，通话就断了。
+Future<void> setCallActive(bool active) async {
+  try {
+    await _channel.invokeMethod<void>('setCallActive', {'active': active});
+  } on PlatformException {
+    // 没有原生侧（桌面、测试）：不拦。
+  } on MissingPluginException {
+    // 同上。
+  }
+}

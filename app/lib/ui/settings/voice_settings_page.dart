@@ -9,6 +9,7 @@ import '../../companion/companion_voice_source.dart';
 import '../../l10n/l10n.dart';
 import '../../speech/wake_pinyin.dart';
 import '../../speech/wake_words.dart';
+import '../../state/chat_state.dart';
 import '../../state/sessions_state.dart';
 import '../../state/wake_binding.dart';
 import '../../state/wake_state.dart';
@@ -141,7 +142,11 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
             ),
             for (final session in sessions)
               ListTile(
-                title: Text(_sessionLabel(session.sessionId)),
+                title: Text(
+                  _titleOf(session.sessionId),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 trailing: current == session.sessionId ? const Icon(AppIcons.selected, size: 20) : null,
                 onTap: () => Navigator.of(sheet).pop(session.sessionId),
               ),
@@ -156,7 +161,13 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
 
   String _shortId(String id) => id.length <= 8 ? id : id.substring(0, 8);
 
-  String _sessionLabel(String id) => _shortId(id);
+  /// 会话的真名字（没加载到就用 id 前 8 位兜底）。
+  String _titleOf(String sessionId) {
+    final title = ref.read(chatProvider(sessionId)).title?.trim();
+    return (title == null || title.isEmpty) ? _shortId(sessionId) : title;
+  }
+
+  String _sessionLabel(String id) => _titleOf(id);
 
   /// 改唤醒词：只收汉字，其他输入当场滤掉（模型只认读音）。
   Future<void> _editWakeWord(String current) async {

@@ -193,6 +193,25 @@ class MainActivity : FlutterActivity() {
         super.onPause()
     }
 
+    /// 语音通话进行中按 home / 切到别的 App：直接缩成画中画，而不是退到后台。
+    /// 退到后台麦克风会被系统掉，通话就断了（画中画里的 Activity 仍算可见）。
+    override fun onUserLeaveHint() {
+        if (callActive) enterPip()
+        super.onUserLeaveHint()
+    }
+
+    private fun enterPip(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return false
+        return try {
+            enterPictureInPictureMode(
+                PictureInPictureParams.Builder().setAspectRatio(Rational(3, 4)).build(),
+            )
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     /** Per activity: the handler acts on this activity, so it goes with it (see [cleanUpFlutterEngine]). */
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -234,20 +253,11 @@ class MainActivity : FlutterActivity() {
                 // the call keeps the microphone (a picture-in-picture activity still counts
                 // as visible) and the conversation is one tap away. Returns false when the
                 // system or the device does not allow it.
-                "enterPictureInPicture" -> {
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-                        result.success(false)
-                        return@setMethodCallHandler
-                    }
-                    val params = PictureInPictureParams.Builder()
-                        .setAspectRatio(Rational(3, 4))
-                        .build()
-                    val entered = try {
-                        enterPictureInPictureMode(params)
-                    } catch (_: Exception) {
-                        false
-                    }
-                    result.success(entered)
+                "enterPictureInPicture" -> result.success(enterPip())
+                // 通话页告诉原生现在是不是在通话，按 home 时据此决定要不要缩成小窗。
+                "setCallActive" -> {
+                    callActive = call.argument<Boolean>("active") ?: false
+                    result.success(null)
                 }
                 // Whether the system has picture-in-picture for this app at all.
                 "pictureInPictureAvailable" -> {
@@ -272,6 +282,10 @@ class MainActivity : FlutterActivity() {
 
     /** Flutter produced a frame recently (see RefreshRateService): auto mode follows it. */
     private var framesActive = true
+
+    /// 正在语音通话（由 Dart 侧的 call setCallActive 告知），
+    /// 按 home 时据此决定是否缩成画中画。
+    private var callActive = false
 
     companion object {
         private const val ENGINE_ID = "dsh-main"
