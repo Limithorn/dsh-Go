@@ -145,5 +145,9 @@
   "wakeSectionFooter": "While this is on the microphone stays open and a notification stays in the shade. Listening in the background needs a microphone-type foreground service; turning it off stops it.",
   "wakeProblemMicBusy": "Another app is holding the microphone",
   "wakeProblemModel": "The wake model could not be loaded",
-  "wakeProblemService": "The system refused the microphone in the background"
+  "wakeProblemService": "The system refused the microphone in the background",
+  "wakeSessionTitle": "After it wakes",
+  "wakeSessionNew": "A new conversation each time",
+  "wakeWordTitle": "Wake word",
+  "wakeWordHint": "Chinese, e.g. 你好肥鱼"
 }

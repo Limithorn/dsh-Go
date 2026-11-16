@@ -19115,6 +19115,18 @@ class L10nZh extends L10n {
   String get wakeProblemService => '系统不让它在后台开麦克风';
 
   @override
+  String get wakeSessionTitle => '叫醒后去哪';
+
+  @override
+  String get wakeSessionNew => '每回新开一间';
+
+  @override
+  String get wakeWordTitle => '唤醒词';
+
+  @override
+  String get wakeWordHint => '填中文，比如 你好肥鱼';
+
+  @override
   String starPromptTitle(int hours) {
     String _temp0 = intl.Intl.pluralLogic(
       hours,

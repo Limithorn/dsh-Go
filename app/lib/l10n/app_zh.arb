@@ -11354,6 +11354,10 @@
   "wakeProblemMicBusy": "麦克风被别的应用占着",
   "wakeProblemModel": "唤醒模型没能载入",
   "wakeProblemService": "系统不让它在后台开麦克风",
+  "wakeSessionTitle": "叫醒后去哪",
+  "wakeSessionNew": "每回新开一间",
+  "wakeWordTitle": "唤醒词",
+  "wakeWordHint": "填中文，比如 你好肥鱼",
   "starPromptTitle": "{hours, plural, =0{本鱼已经在 DSH Go 里陪你半个小时啦⁠~} =1{本鱼已经在 DSH Go 里陪你一个小时啦⁠~} other{本鱼已经在 DSH Go 里陪你 {hours} 个小时啦⁠~}}",
   "@starPromptTitle": {
     "description": "The star prompt's first line. hours is the whole hours of use so far, rounded down; 0 is half an hour (the first ask comes after 30 minutes). The word joiner keeps the ~ on the line of the word before it.",

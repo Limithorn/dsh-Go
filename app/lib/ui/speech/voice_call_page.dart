@@ -128,7 +128,11 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   bool _collapsed = false;
 
   /// Where the shrunk card has been dragged to, from its first place.
-  Offset _cardDrag = Offset.zero;
+  ///
+  /// A notifier rather than state: a finger moving has to redraw only the card,
+  /// and this page carries a whole field of light behind it. Rebuilding the page
+  /// on every move froze the whole screen, which is what a drag felt like.
+  final _cardDrag = ValueNotifier<Offset>(Offset.zero);
 
   /// The system asks for less motion (read each build): the light holds still
   /// and the page comes in without its staggered rise.
@@ -366,8 +370,9 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
       alignment: Alignment.bottomCenter,
       child: SafeArea(
         minimum: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-        child: Transform.translate(
-          offset: _cardDrag,
+        child: ValueListenableBuilder<Offset>(
+          valueListenable: _cardDrag,
+          builder: (context, drag, child) => Transform.translate(offset: drag, child: child),
           child: GestureDetector(
             // The card itself moves; the keys on it still take their taps.
             onPanUpdate: (details) {
@@ -375,12 +380,10 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
               // found again, which is why it moved once and then stopped.
               final half = screen.width / 2 - 150;
               final up = screen.height - 180;
-              setState(() {
-                _cardDrag = Offset(
-                  (_cardDrag.dx + details.delta.dx).clamp(-half, half),
-                  (_cardDrag.dy + details.delta.dy).clamp(-up, 0),
-                );
-              });
+              _cardDrag.value = Offset(
+                (_cardDrag.value.dx + details.delta.dx).clamp(-half, half),
+                (_cardDrag.value.dy + details.delta.dy).clamp(-up, 0),
+              );
             },
             child: card,
           ),
@@ -425,6 +428,7 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
       ..removeListener(_changed)
       ..dispose();
     _scene.dispose();
+    _cardDrag.dispose();
     super.dispose();
   }
 
