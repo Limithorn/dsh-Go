@@ -129,12 +129,8 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   /// the microphone and the turn under way carry on.
   bool _collapsed = false;
 
-  /// Where the shrunk card has been dragged to, from its first place.
-  ///
-  /// A notifier rather than state: a finger moving has to redraw only the card,
-  /// and this page carries a whole field of light behind it. Rebuilding the page
-  /// on every move froze the whole screen, which is what a drag felt like.
-  final _cardDrag = ValueNotifier<Offset>(Offset.zero);
+  /// 收起卡片的拖动位置现由卡片自己持有（_CollapsedCallCard），
+  /// 页面不再参与（drag）。 
 
   /// The system asks for less motion (read each build): the light holds still
   /// and the page comes in without its staggered rise.
@@ -346,75 +342,14 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   /// The call as a card at the bottom, over whatever is below the route.
   Widget _collapsedCard(L10n l10n, ThemeData theme) {
     final (status, _) = _status(l10n);
-    final ended = _call.phase == CallPhase.ended;
-    final ink = theme.colorScheme;
-    final screen = MediaQuery.sizeOf(context);
-    final card = Material(
-      key: const ValueKey('call-collapsed'),
-      elevation: 10,
-      borderRadius: BorderRadius.circular(22),
-      color: ink.surfaceContainerHigh,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 6, 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(AppIcons.voice, size: 18, color: ink.primary),
-            const SizedBox(width: 10),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 170),
-              child: Text(
-                status,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium,
-              ),
-            ),
-            IconButton(
-              key: const ValueKey('call-expand'),
-              tooltip: l10n.speechCallExpand,
-              icon: const Icon(Icons.open_in_full, size: 18),
-              onPressed: () => setState(() => _collapsed = false),
-            ),
-            IconButton(
-              key: const ValueKey('call-picture-in-picture'),
-              tooltip: l10n.speechCallPictureInPicture,
-              icon: const Icon(Icons.picture_in_picture_alt, size: 18),
-              onPressed: ended ? null : _enterPip,
-            ),
-            IconButton(
-              key: const ValueKey('call-collapsed-hang-up'),
-              tooltip: l10n.speechCallHangUp,
-              icon: Icon(AppIcons.hangUp, size: 20, color: ink.error),
-              onPressed: ended ? null : _hangUp,
-            ),
-          ],
-        ),
-      ),
-    );
-    return Align(
-      alignment: Alignment.bottomCenter,
-      child: SafeArea(
-        minimum: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-        child: ValueListenableBuilder<Offset>(
-          valueListenable: _cardDrag,
-          builder: (context, drag, child) => Transform.translate(offset: drag, child: child),
-          child: GestureDetector(
-            // The card itself moves; the keys on it still take their taps.
-            onPanUpdate: (details) {
-              // Kept inside the screen: a card dragged past the edge cannot be
-              // found again, which is why it moved once and then stopped.
-              final half = screen.width / 2 - 150;
-              final up = screen.height - 180;
-              _cardDrag.value = Offset(
-                (_cardDrag.value.dx + details.delta.dx).clamp(-half, half),
-                (_cardDrag.value.dy + details.delta.dy).clamp(-up, 0),
-              );
-            },
-            child: card,
-          ),
-        ),
-      ),
+    return _CollapsedCallCard(
+      status: status,
+      ended: _call.phase == CallPhase.ended,
+      l10n: l10n,
+      theme: theme,
+      onExpand: () => setState(() => _collapsed = false),
+      onPip: _enterPip,
+      onHangUp: _hangUp,
     );
   }
 
@@ -459,7 +394,6 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
       ..removeListener(_changed)
       ..dispose();
     _scene.dispose();
-    _cardDrag.dispose();
     super.dispose();
   }
 
@@ -602,26 +536,28 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     return ColoredBox(
       color: ink.surface,
       child: SafeArea(
-        minimum: const EdgeInsets.all(10),
+        minimum: const EdgeInsets.all(8),
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Expanded(
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 96, maxHeight: 96),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [ink.primary.withValues(alpha: 0.85), ink.primary.withValues(alpha: 0.15)],
-                      ),
-                    ),
-                  ),
+            // 球要有真实尺寸：DecoratedBox 没 child 时会塔成 0，之前小窗里
+            // 只剩文字和挂断、球不见了，就是这个原因。
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    ink.primary.withValues(alpha: 0.9),
+                    ink.primary.withValues(alpha: 0.25),
+                  ],
                 ),
               ),
             ),
+            const SizedBox(height: 10),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Text(
                 status,
                 maxLines: 2,
@@ -631,11 +567,16 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
               ),
             ),
             const SizedBox(height: 8),
-            IconButton.filledTonal(
-              key: const ValueKey('call-pip-hang-up'),
-              tooltip: l10n.speechCallHangUp,
-              onPressed: ended ? null : _hangUp,
-              icon: Icon(AppIcons.hangUp, size: 20, color: ink.error),
+            SizedBox(
+              width: 44,
+              height: 44,
+              child: IconButton.filledTonal(
+                key: const ValueKey('call-pip-hang-up'),
+                padding: EdgeInsets.zero,
+                tooltip: l10n.speechCallHangUp,
+                onPressed: ended ? null : _hangUp,
+                icon: Icon(AppIcons.hangUp, size: 20, color: ink.error),
+              ),
             ),
           ],
         ),
@@ -884,6 +825,112 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 收起后的通话卡片。
+///
+/// 自己拿着位置，自己 setState：拖动只重建这一小棵树，不碰后面那页（那页有整片
+/// 流动的光，重建一次就是压死主线程的代价）。之前把它写在页面里、靠页面的 state
+/// 或外层通知器去推，拖一次就卡住——因为每次重建都新建 GestureDetector，手势
+/// 识别器跟着被销毁重建，拖动就断在那里。
+class _CollapsedCallCard extends StatefulWidget {
+  const _CollapsedCallCard({
+    required this.status,
+    required this.ended,
+    required this.l10n,
+    required this.theme,
+    required this.onExpand,
+    required this.onPip,
+    required this.onHangUp,
+  });
+
+  final String status;
+  final bool ended;
+  final L10n l10n;
+  final ThemeData theme;
+  final VoidCallback onExpand;
+  final Future<void> Function() onPip;
+  final VoidCallback onHangUp;
+
+  @override
+  State<_CollapsedCallCard> createState() => _CollapsedCallCardState();
+}
+
+class _CollapsedCallCardState extends State<_CollapsedCallCard> {
+  Offset _drag = Offset.zero;
+
+  @override
+  Widget build(BuildContext context) {
+    final ink = widget.theme.colorScheme;
+    final screen = MediaQuery.sizeOf(context);
+    final card = Material(
+      key: const ValueKey('call-collapsed'),
+      elevation: 10,
+      borderRadius: BorderRadius.circular(22),
+      color: ink.surfaceContainerHigh,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 6, 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(AppIcons.voice, size: 18, color: ink.primary),
+            const SizedBox(width: 10),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 170),
+              child: Text(
+                widget.status,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: widget.theme.textTheme.bodyMedium,
+              ),
+            ),
+            IconButton(
+              key: const ValueKey('call-expand'),
+              tooltip: widget.l10n.speechCallExpand,
+              icon: const Icon(Icons.open_in_full, size: 18),
+              onPressed: widget.onExpand,
+            ),
+            IconButton(
+              key: const ValueKey('call-picture-in-picture'),
+              tooltip: widget.l10n.speechCallPictureInPicture,
+              icon: const Icon(Icons.picture_in_picture_alt, size: 18),
+              onPressed: widget.ended ? null : widget.onPip,
+            ),
+            IconButton(
+              key: const ValueKey('call-collapsed-hang-up'),
+              tooltip: widget.l10n.speechCallHangUp,
+              icon: Icon(AppIcons.hangUp, size: 20, color: ink.error),
+              onPressed: widget.ended ? null : widget.onHangUp,
+            ),
+          ],
+        ),
+      ),
+    );
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: SafeArea(
+        minimum: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+        child: Transform.translate(
+          offset: _drag,
+          child: GestureDetector(
+            // 卡片自己动，上面的键照样点得到。
+            onPanUpdate: (details) {
+              // 位置限在屏幕里：拖出可视区就再也搔不到。
+              final half = screen.width / 2 - 150;
+              final up = screen.height - 180;
+              setState(() {
+                _drag = Offset(
+                  (_drag.dx + details.delta.dx).clamp(-half, half),
+                  (_drag.dy + details.delta.dy).clamp(-up, 0),
+                );
+              });
+            },
+            child: card,
           ),
         ),
       ),
