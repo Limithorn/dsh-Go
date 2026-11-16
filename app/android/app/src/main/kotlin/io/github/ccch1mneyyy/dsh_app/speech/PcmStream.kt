@@ -62,7 +62,10 @@ class PcmStream(
             AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(if (call) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA)
+                        // 通话里曾经走 USAGE_VOICE_COMMUNICATION，音声沿着那条道出去，
+                        // 音量被通话音量管着，听着总是很小。改成 MEDIA：和播放音乐同一条道，
+                        // 安静通话也听得清；回声由采集侧的 AcousticEchoCanceler 管。
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build(),
                 )

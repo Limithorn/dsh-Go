@@ -209,8 +209,11 @@ class MainActivity : FlutterActivity() {
 
     override fun onPause() {
         inForeground = false
-        framesActive = false
-        applyRefreshRate()
+        // 画中画里不能停帧：小窗是活的，停帧就是画面定在那儿不动（之前『卡住』就这样）。
+        if (!isInPictureInPictureMode) {
+            framesActive = false
+            applyRefreshRate()
+        }
         super.onPause()
     }
 
@@ -219,6 +222,18 @@ class MainActivity : FlutterActivity() {
     override fun onUserLeaveHint() {
         if (callActive) enterPip()
         super.onUserLeaveHint()
+    }
+
+    /// 画中画进出时告诉 Dart：小窗里要换成简版布局。
+    /// 同时把渲染重新打开：进小窗那一刻 onPause 可能已经把帧停了。
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        if (isInPictureInPictureMode) {
+            framesActive = true
+            inForeground = true
+            applyRefreshRate()
+        }
+        appChannel?.invokeMethod("pictureInPictureChanged", isInPictureInPictureMode)
     }
 
     private fun enterPip(): Boolean {
@@ -279,6 +294,20 @@ class MainActivity : FlutterActivity() {
                 // 通话页告诉原生现在是不是在通话，按 home 时据此决定要不要缩成小窗。
                 "setCallActive" -> {
                     callActive = call.argument<Boolean>("active") ?: false
+                    // Android 12 起该用 autoEnter：事先告诉系统「我在通话」，
+                    // 人一按 home 它自己就缩成小窗。onUserLeaveHint 里再调一次
+                    // 在 12+ 上容易被当成「Activity 已经走了」而失败，
+                    // 这就是之前按 home 后小窗没出来的原因。
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        runCatching {
+                            setPictureInPictureParams(
+                                PictureInPictureParams.Builder()
+                                    .setAspectRatio(Rational(3, 4))
+                                    .setAutoEnterEnabled(callActive)
+                                    .build(),
+                            )
+                        }
+                    }
                     result.success(null)
                 }
                 // Whether the system has picture-in-picture for this app at all.
