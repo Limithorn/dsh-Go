@@ -32,9 +32,8 @@ import '../../speech/speech_settings.dart';
 import '../../speech/voice_cloud.dart';
 import '../../state/account_state.dart';
 import '../../state/app_notes.dart';
-import '../../state/call_surface_state.dart';
-import '../../state/notify_state.dart';
 import '../../state/picture_in_picture.dart';
+import '../../state/voice_call_host.dart';
 import '../../state/voice_settings.dart';
 import '../../state/voice_state.dart';
 import '../chat/voice/voice_bridge.dart';
@@ -43,11 +42,11 @@ import '../companion/companion_stage.dart';
 import '../fx/voice_ring/voice_ring.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
+import '../../state/streaming_asr_model_state.dart';
 import '../../state/streaming_asr_state.dart';
 import '../../state/streaming_pcm_state.dart';
 import '../../usage/usage_stats.dart';
 import '../../voice/live_words.dart';
-import '../../voice/live_words_model.dart';
 import '../../voice/streaming_pcm.dart';
 import 'call/call_backdrop.dart';
 import 'call/call_parts.dart';
@@ -56,29 +55,57 @@ import 'call/call_visuals.dart';
 import 'speech_ui.dart';
 
 /// Opens a call with the main chat's conversation. [session] gives its id,
-/// creating it for a new chat; [title] heads the page.
+/// creating it for a new chat; [title] heads the page. [conversation] stands
+/// in for the real one in tests.
+///
+/// The call lives in the host (state/voice_call_host.dart), not in the page:
+/// 收起 pops the route and the card takes over; this page is only the view.
 Future<void> openChatCall(
   BuildContext context, {
   required String title,
   required Future<String?> Function() session,
+  CallConversation? conversation,
 }) async {
   final container = ProviderScope.containerOf(context, listen: false);
+  final host = VoiceCallHost.instance;
+  if (host.call != null) {
+    // 已在通话里：不另开一通，把页面带回来。
+    if (host.collapsed && !host.pageUp) await host.expand(context);
+    return;
+  }
   container.read(readAloudProvider.notifier).stop();
-  // The call is shown whole while this page is up (state/call_surface_state.dart).
-  // Set here, not in the page's own lifecycle: a provider is not to be written
-  // from a widget that is being disposed.
-  container.read(callSurfaceProvider.notifier).set(CallSurface.full);
-  await Navigator.of(context).push(
+  await host.openCall(
+    container: container,
+    title: title,
+    conversation: conversation ?? ChatCallConversation(container, session),
+    push: () => pushVoiceCallPage(context, call: host.call!, title: title, onCollapse: host.collapse),
+  );
+}
+
+/// The call page as one route: transparent, without a barrier (a barrier on a
+/// transparent route eats the whole screen's touches), rising out of the dark.
+/// [call] is the controller the page shows — the host (state/voice_call_host.dart)
+/// makes it before pushing, so 收起 can pop this route and push it back with
+/// the same call; [onCollapse] tells the host the page is going away for 收起.
+Future<void> pushVoiceCallPage(
+  BuildContext context, {
+  required VoiceCallController call,
+  required String title,
+  void Function(BuildContext pageContext)? onCollapse,
+}) {
+  return Navigator.of(context).push(
     PageRouteBuilder<void>(
-      // 透明路可以，但不能带 barrier：PageRouteBuilder 的 barrierDismissible
-      // 默认是 true，于是这条透明路由上盖了一层看不见的 ModalBarrier，
-      // 把整屏的点击全部吃掉——收起后点哪都没反应，根子在这里。
       barrierDismissible: false,
       opaque: false,
       fullscreenDialog: true,
       transitionDuration: AppMotion.of(context, const Duration(milliseconds: 520)),
       reverseTransitionDuration: AppMotion.of(context, AppMotion.collapse),
-      pageBuilder: (_, _, _) => VoiceCallPage(title: title, conversation: ChatCallConversation(container, session)),
+      pageBuilder: (_, _, _) => VoiceCallPage(
+        title: title,
+        conversation: call.conversation,
+        controller: call,
+        onCollapse: onCollapse,
+      ),
       transitionsBuilder: (_, animation, _, child) {
         final curve = CurvedAnimation(parent: animation, curve: AppMotion.enter, reverseCurve: AppMotion.exit);
         // Opening: the page rises out of the dark.
@@ -89,16 +116,101 @@ Future<void> openChatCall(
       },
     ),
   );
-  // Off the call: its conversation is no longer the one being heard (ChatCallConversation set it).
-  container.read(callChatProvider.notifier).set(null);
-  container.read(callSurfaceProvider.notifier).set(CallSurface.none);
+}
+
+/// The status line for a call, wherever it is drawn: on the page, on the
+/// 收起 card, in the picture-in-picture window. [signedIn] is read lazily,
+/// only to word the no-recognizer ending — it drags the account's connection
+/// state with it, which nobody should pay for just to word a status.
+(String, bool) callStatus(L10n l10n, VoiceCallController call, {required bool Function() signedIn}) {
+  if (call.phase == CallPhase.ended) {
+    return (
+      switch (call.ended) {
+        CallEnd.permission => l10n.speechCallEndPermission,
+        CallEnd.microphone => l10n.speechCallEndMicrophone,
+        CallEnd.noRecognizer => signedIn() ? l10n.speechCallEndNoRecognizerSignedIn : l10n.speechCallEndNoRecognizer,
+        CallEnd.background => l10n.speechCallEndBackground,
+        CallEnd.failed => l10n.speechCallEndFailed,
+        CallEnd.hungUp || null => l10n.speechCallEnded,
+      },
+      false,
+    );
+  }
+  if (call.muted && call.phase != CallPhase.speaking && call.phase != CallPhase.thinking) {
+    return (l10n.speechCallMuted, false);
+  }
+  return switch (call.phase) {
+    CallPhase.starting => (l10n.speechCallStarting, true),
+    CallPhase.listening => (l10n.speechCallListening, true),
+    CallPhase.hearing => (l10n.speechCallHearing, false),
+    CallPhase.thinking => (l10n.speechCallThinking, true),
+    CallPhase.speaking => (l10n.speechCallSpeaking, false),
+    CallPhase.ended => (l10n.speechCallEnded, false),
+  };
+}
+
+/// 画中画小窗里的样子：一只鲸鱼娘立绘 + 一句状态。
+///
+/// 小窗是方的、宽度只有屏幕的三分之一，整页缩进去会挤成一片，所以单独排。
+/// 小窗里不做可点的控件：Android 把小窗里的单击拿去展开系统控制，双击才回 App，
+/// 按钮画得再好也点不到。所以小窗只负责「让人一眼看出还在通话」：
+/// 宠物 + 一句状态，想操作就双击回 App。
+///
+/// 收起状态下页面已经 pop 了，这副样子也由 CallCardLayer 画给画中画。
+Widget callPipView({required L10n l10n, required ThemeData theme, required VoiceCallController call, bool signedIn = false}) {
+  final (status, _) = callStatus(l10n, call, signedIn: () => signedIn);
+  final ink = theme.colorScheme;
+  return ColoredBox(
+    color: ink.surface,
+    child: SafeArea(
+      minimum: const EdgeInsets.all(8),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Center(
+              // 小窗里用贴纸立绘（pip.png，384x519）；精灵条那几张是一排帧，
+              // 缩到小窗里只剩几个像素，看不出是谁。
+              child: Image.asset(
+                'assets/pets/whale-girl/pip.png',
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.medium,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text(
+              status,
+              maxLines: 2,
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelMedium,
+            ),
+          ),
+          const SizedBox(height: 6),
+        ],
+      ),
+    ),
+  );
 }
 
 class VoiceCallPage extends ConsumerStatefulWidget {
-  const VoiceCallPage({super.key, required this.title, required this.conversation});
+  const VoiceCallPage({super.key, required this.title, required this.conversation, this.controller, this.onCollapse});
 
   final String title;
   final CallConversation conversation;
+
+  /// The call this page shows. Given when [openChatCall] pushes it: the call
+  /// lives in the host (state/voice_call_host.dart), out of any page, so 收起
+  /// can pop this route and the call carries on. Without one the page makes
+  /// its own — a page that owns its call (tests) folds itself into a card
+  /// instead of popping.
+  final VoiceCallController? controller;
+
+  /// 收起 for a hosted call: tell the host (its card takes over) and pop this
+  /// route. Null (the page owns the call): the page only folds itself.
+  final void Function(BuildContext pageContext)? onCollapse;
 
   @override
   ConsumerState<VoiceCallPage> createState() => _VoiceCallPageState();
@@ -106,6 +218,14 @@ class VoiceCallPage extends ConsumerStatefulWidget {
 
 class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindingObserver, TickerProviderStateMixin {
   late final VoiceCallController _call;
+
+  /// The page made its own controller (no [VoiceCallPage.controller] given)
+  /// and ends it by going away.
+  bool _mine = false;
+
+  /// The hosted call is being 收起: this route is popping, the call stays.
+  bool _collapsing = false;
+
   final _scene = CallScene();
   late final AnimationController _enter = AnimationController(
     vsync: this,
@@ -127,12 +247,11 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   /// A finger on the light: it gives a little.
   bool _pressed = false;
 
-  /// 收起: the call as one card over the conversation. The page stays alive, so
-  /// the microphone and the turn under way carry on.
+  /// 收起: the call as one card. A hosted call pops this route instead and the
+  /// host's card shows (CallCardLayer); this fold is only for a page that owns
+  /// its call, and the page stays alive, so the microphone and the turn under
+  /// way carry on.
   bool _collapsed = false;
-
-  /// 收起卡片的拖动位置现由卡片自己持有（_CollapsedCallCard），
-  /// 页面不再参与（drag）。 
 
   /// The system asks for less motion (read each build): the light holds still
   /// and the page comes in without its staggered rise.
@@ -147,57 +266,69 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     unawaited(setCallScreen(true));
     watchPictureInPicture();
     pictureInPictureMode.addListener(_onPipChanged);
-    final callSettings = ref.read(callSettingsProvider.notifier);
-    final voices = ref.read(speechVoiceSettingsProvider.notifier);
-    // The chosen voice, as soon as the settings have been read (the first reply comes later).
-    _voice = ref.read(speechVoiceSettingsProvider) ?? voices.defaults;
-    final speaker = ref.read(speechSpeakerProvider);
-    final audio = ref.read(speechAudioProvider);
-    final deepseek = ref.read(deepSeekSpeechProvider);
-    final bridge = ref.read(voiceBridgeProvider);
-    _call = VoiceCallController(
-      audio: audio,
-      conversation: widget.conversation,
-      recognizer: () async {
-        // The phone's own voice warms up while the call starts, not when changed mid-reply.
-        await _settleVoice(warm: _call.phase == CallPhase.starting);
-        if (!mounted) return null;
-        return ref.read(callRecognizerProvider)();
-      },
-      voice: () => speechOutFor(
-        _voice,
-        deepseek: deepseek,
+    _mine = widget.controller == null;
+    if (_mine) {
+      final callSettings = ref.read(callSettingsProvider.notifier);
+      final voices = ref.read(speechVoiceSettingsProvider.notifier);
+      // The chosen voice, as soon as the settings have been read (the first reply comes later).
+      _voice = ref.read(speechVoiceSettingsProvider) ?? voices.defaults;
+      final speaker = ref.read(speechSpeakerProvider);
+      final audio = ref.read(speechAudioProvider);
+      final deepseek = ref.read(deepSeekSpeechProvider);
+      final bridge = ref.read(voiceBridgeProvider);
+      _call = VoiceCallController(
         audio: audio,
-        speaker: speaker,
-        call: true,
-        levels: true,
-        gap: ref.read(deepSeekSpeechGapProvider),
-      ),
-      // The saved ones, not the defaults shown while they load (a first call after launch).
-      choices: () async {
-        final saved = await callSettings.ready();
-        return (
-          bargeIn: saved.bargeIn,
-          speaker: saved.speaker,
-          spokenHint: saved.spoken ? appNote(appL10n.speechCallHint) : null,
-          pause: saved.pause,
-        );
-      },
-      permission: () async => await bridge.requestPermission() == VoicePermission.granted,
-      cutNote: (heard) => appNote(heard.isEmpty ? appL10n.speechCallCutEarly : appL10n.speechCallCutNote(heard)),
-      thinkingCue: () async {
-        // Asked again after the settings: her voice may have begun meanwhile.
-        if ((await callSettings.ready()).cue && _call.cueStill) await playThinkingCue(audio);
-      },
-    )..addListener(_changed);
-    // Changed in 通话设置 (or anywhere) during the call: from the next sentence on.
-    ref.listenManual(speechVoiceSettingsProvider, (_, _) => unawaited(_settleVoice()));
-    ref.listenManual(voiceSettingsProvider, (_, _) => unawaited(_call.refreshRecognizer()));
-    ref.listenManual(cloudAsrProvider, (_, _) => unawaited(_call.refreshRecognizer()));
-    ref.listenManual(callSettingsProvider.select((s) => s.pause), (_, pause) => _call.setPause(pause));
+        conversation: widget.conversation,
+        recognizer: () async {
+          // The phone's own voice warms up while the call starts, not when changed mid-reply.
+          await _settleVoice(warm: _call.phase == CallPhase.starting);
+          if (!mounted) return null;
+          return ref.read(callRecognizerProvider)();
+        },
+        voice: () => speechOutFor(
+          _voice,
+          deepseek: deepseek,
+          audio: audio,
+          speaker: speaker,
+          call: true,
+          levels: true,
+          gap: ref.read(deepSeekSpeechGapProvider),
+        ),
+        // The saved ones, not the defaults shown while they load (a first call after launch).
+        choices: () async {
+          final saved = await callSettings.ready();
+          return (
+            bargeIn: saved.bargeIn,
+            speaker: saved.speaker,
+            spokenHint: saved.spoken ? appNote(appL10n.speechCallHint) : null,
+            pause: saved.pause,
+          );
+        },
+        permission: () async => await bridge.requestPermission() == VoicePermission.granted,
+        cutNote: (heard) => appNote(heard.isEmpty ? appL10n.speechCallCutEarly : appL10n.speechCallCutNote(heard)),
+        thinkingCue: () async {
+          // Asked again after the settings: her voice may have begun meanwhile.
+          if ((await callSettings.ready()).cue && _call.cueStill) await playThinkingCue(audio);
+        },
+      )..addListener(_changed);
+      // Changed in 通话设置 (or anywhere) during the call: from the next sentence on.
+      ref.listenManual(speechVoiceSettingsProvider, (_, _) => unawaited(_settleVoice()));
+      ref.listenManual(voiceSettingsProvider, (_, _) => unawaited(_call.refreshRecognizer()));
+      ref.listenManual(cloudAsrProvider, (_, _) => unawaited(_call.refreshRecognizer()));
+      ref.listenManual(callSettingsProvider.select((s) => s.pause), (_, pause) => _call.setPause(pause));
+    } else {
+      // The host's call: the settings are listened there (they must outlive
+      // this page — 收起 pops it); here the page is only the view.
+      _call = widget.controller!;
+      _call.addListener(_changed);
+      // An ended call pushed back (it ended while 收起): the reason shows a
+      // moment, then the route goes as usual.
+      if (_call.phase == CallPhase.ended) _scheduleLeave();
+    }
+    _shown = _call.phase;
     HapticFeedback.mediumImpact();
     _enter.forward();
-    unawaited(_start());
+    unawaited(_start(start: _mine));
   }
 
   /// Live captions, once the call listens, when the streaming model is on the phone.
@@ -205,6 +336,26 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
 
   /// Her voice for the next reply.
   late CompanionVoiceSettings _voice;
+
+  /// The hosted call is already started (the host did, before pushing): only
+  /// the live captions are set up here.
+  Future<void> _start({bool start = true}) async {
+    _callConnect = ref.read(usageStatsProvider.notifier).beginOperation(UsageOperation.callConnect);
+    if (start) await _call.start();
+    try {
+      final pcm = ref.read(streamingPcmCaptureProvider);
+      final asr = ref.read(streamingAsrProvider);
+      final store = ref.read(streamingAsrModelStoreProvider.future);
+      final models = await store;
+      final model = await models.installed();
+      if (model == null || !mounted || _call.phase == CallPhase.ended) return;
+      final live = _live = LiveWords(pcm, asr, model, StreamingPcmSource.call, _call.live, trial: models.trial);
+      await live.start();
+    } on Object {
+      // Without live captions the call goes on as before.
+      _live = null;
+    }
+  }
 
   /// [_voice] from the settings: DeepSeek's with nobody to pay for it here
   /// becomes the phone's own; the phone's own warms up.
@@ -234,32 +385,6 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
 
   int _settling = 0;
 
-  Future<void> _start() async {
-    final pcm = ref.read(streamingPcmCaptureProvider);
-    final asr = ref.read(streamingAsrProvider);
-    final found = liveWordsModel(ref);
-    _callConnect = ref.read(usageStatsProvider.notifier).beginOperation(UsageOperation.callConnect);
-    await _call.start();
-    try {
-      final chosen = await found;
-      if (chosen == null || !mounted || _call.phase == CallPhase.ended) return;
-      final live = _live = LiveWords(
-        pcm,
-        asr,
-        chosen.model,
-        StreamingPcmSource.call,
-        _call.live,
-        trial: chosen.trial,
-        // Captions that stop mid-call leave the call itself going.
-        onFailure: (_) => _live = null,
-      );
-      await live.start();
-    } on Object {
-      // Without live captions the call goes on as before.
-      _live = null;
-    }
-  }
-
   void _changed() {
     if (!mounted) return;
     final phase = _call.phase;
@@ -288,23 +413,26 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
       _arrived(phase);
       _shown = phase;
     }
-    if (phase == CallPhase.ended && _leave == null) {
-      // Hung up: the light sinks away first. Ended for a reason: the reason stays a moment.
-      _leave = Timer(
-        _call.ended == CallEnd.hungUp ? const Duration(milliseconds: 380) : const Duration(milliseconds: 2600),
-        () {
-          if (!mounted) return;
-          // The call page itself, not a sheet open over it (字幕, 背景).
-          final route = ModalRoute.of(context);
-          // Already left (Back just before this): nothing of anyone else's is closed.
-          if (route == null || !route.isActive) return;
-          final navigator = Navigator.of(context);
-          if (!route.isCurrent) navigator.popUntil((r) => r == route);
-          unawaited(navigator.maybePop());
-        },
-      );
-    }
+    if (phase == CallPhase.ended) _scheduleLeave();
     setState(() {});
+  }
+
+  /// The call has ended while its page is up: the light sinks away first;
+  /// ended for a reason, the reason stays a moment, then the route goes.
+  void _scheduleLeave() {
+    _leave ??= Timer(
+      _call.ended == CallEnd.hungUp ? const Duration(milliseconds: 380) : const Duration(milliseconds: 2600),
+      () {
+        if (!mounted) return;
+        // The call page itself, not a sheet open over it (字幕, 背景).
+        final route = ModalRoute.of(context);
+        // Already left (Back just before this): nothing of anyone else's is closed.
+        if (route == null || !route.isActive) return;
+        final navigator = Navigator.of(context);
+        if (!route.isCurrent) navigator.popUntil((r) => r == route);
+        unawaited(navigator.maybePop());
+      },
+    );
   }
 
   /// A new phase: a touch under the finger, and her mood when she is there.
@@ -342,17 +470,58 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     await enterPictureInPicture();
   }
 
-  /// The call as a card at the bottom, over whatever is below the route.
+  /// 收起. A hosted call: tell the host and pop this route — the card takes
+  /// over on the RootGate and the call carries on. A page that owns its call
+  /// (tests): fold itself into a card in place, as before.
+  void _collapse() {
+    if (widget.onCollapse case final hosted?) {
+      _collapsing = true;
+      hosted(context);
+      return;
+    }
+    setState(() => _collapsed = true);
+  }
+
+  /// The call as a card at the bottom, over whatever is below the route (a
+  /// page that owns its call and folds itself; a hosted call pops instead and
+  /// the host's card shows — CallCardLayer).
   Widget _collapsedCard(L10n l10n, ThemeData theme) {
     final (status, _) = _status(l10n);
-    return _CollapsedCallCard(
-      status: status,
-      ended: _call.phase == CallPhase.ended,
-      l10n: l10n,
-      theme: theme,
-      onExpand: () => setState(() => _collapsed = false),
-      onPip: _enterPip,
-      onHangUp: _hangUp,
+    return PopScope(
+      // 收起状态按返回：展开回去，而不是把整通电话丢掉。
+      // 之前返回键直接 pop 掉通话页，通话就没了，这是用户报的那一条。
+      canPop: _call.phase != CallPhase.ended,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) setState(() => _collapsed = false);
+      },
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // 这一层把整个屏幕占住但不收任何指针事件：收起时下面的对话页、输入框
+          // 都还要能点。之前用 Align 直接把卡片摆在全屏里，整页看着是空的却把
+          // 所有触摸吃掉了——点哪都没反应就是这么来的。
+          const IgnorePointer(child: SizedBox.expand()),
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 20,
+            child: RepaintBoundary(
+              child: Align(
+                alignment: Alignment.center,
+                child: CollapsedCallCard(
+                  status: status,
+                  ended: _call.phase == CallPhase.ended,
+                  l10n: l10n,
+                  theme: theme,
+                  onExpand: () => setState(() => _collapsed = false),
+                  onPip: _enterPip,
+                  onHangUp: _hangUp,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -390,18 +559,25 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    unawaited(setCallActive(false));
-    unawaited(setCallScreen(false));
     pictureInPictureMode.removeListener(_onPipChanged);
     stopWatchingPictureInPicture();
     unawaited(_live?.stop());
     _leave?.cancel();
     _enter.dispose();
+    // 页面先走了但记账还没结：按"结果未知"上报，别把一通电话的统计漏掉。
     _callConnect?.call(UsageOutcome.unknown);
     _callSession?.call(UsageOutcome.unknown);
-    _call
-      ..removeListener(_changed)
-      ..dispose();
+    _call.removeListener(_changed);
+    if (_mine) {
+      // This page owns the call: it ends by the page going away.
+      unawaited(setCallActive(false));
+      unawaited(setCallScreen(false));
+      _call.dispose();
+    } else if (!_collapsing && _call.phase != CallPhase.ended) {
+      // A hosted call only loses its page by 收起 (which says so first) or by
+      // ending; anything else (back on the full page) ends it, as before.
+      _call.hangUp();
+    }
     _scene.dispose();
     super.dispose();
   }
@@ -412,37 +588,7 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   }
 
   (String, bool) _status(L10n l10n) {
-    if (_call.phase == CallPhase.ended) {
-      return (
-        switch (_call.ended) {
-          CallEnd.permission => l10n.speechCallEndPermission,
-          CallEnd.microphone => l10n.speechCallEndMicrophone,
-          CallEnd.noRecognizer =>
-            wordsForIos
-                ? (ref.read(accountProvider).signedIn
-                      ? l10n.iosSpeechCallEndNoRecognizerSignedIn
-                      : l10n.iosSpeechCallEndNoRecognizer)
-                : (ref.read(accountProvider).signedIn
-                      ? l10n.speechCallEndNoRecognizerSignedIn
-                      : l10n.speechCallEndNoRecognizer),
-          CallEnd.background => l10n.speechCallEndBackground,
-          CallEnd.failed => l10n.speechCallEndFailed,
-          CallEnd.hungUp || null => l10n.speechCallEnded,
-        },
-        false,
-      );
-    }
-    if (_call.muted && _call.phase != CallPhase.speaking && _call.phase != CallPhase.thinking) {
-      return (l10n.speechCallMuted, false);
-    }
-    return switch (_call.phase) {
-      CallPhase.starting => (l10n.speechCallStarting, true),
-      CallPhase.listening => (l10n.speechCallListening, true),
-      CallPhase.hearing => (l10n.speechCallHearing, false),
-      CallPhase.thinking => (l10n.speechCallThinking, true),
-      CallPhase.speaking => (l10n.speechCallSpeaking, false),
-      CallPhase.ended => (l10n.speechCallEnded, false),
-    };
+    return callStatus(l10n, _call, signedIn: () => ref.read(accountProvider).signedIn);
   }
 
   /// The light in the middle: Libraries.dev's voice ring (its ribbon or its single line),
@@ -534,51 +680,6 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     unawaited(showCallTranscript(context, _call));
   }
 
-  /// 画中画小窗里的样子：一球、一句状态、一个挂断。
-  ///
-  /// 小窗是方的、宽度只有屏幕的三分之一，整页缩进去会挤成一片，所以单独排：
-  /// 球占上方，状态压在它下面，挂断固定在底部中央，Grand 手势和点击区域都留够。
-  Widget _pipView(L10n l10n, ThemeData theme) {
-    final (status, _) = _status(l10n);
-    final ink = theme.colorScheme;
-    // 小窗里不做可点的控件：Android 把小窗里的单击拿去展开系统控制，双击才回 App，
-    // 按钮画得再好也点不到。所以小窗只负责「让人一眼看出还在通话」：
-    // 宠物 + 一句状态，想操作就双击回 App。
-    return ColoredBox(
-      color: ink.surface,
-      child: SafeArea(
-        minimum: const EdgeInsets.all(8),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Expanded(
-              child: Center(
-                // 小窗里用贴纸立绘（pip.png，384x519）；精灵条那几张是一排帧，
-                // 缩到小窗里只剩几个像素，看不出是谁。
-                child: Image.asset(
-                  'assets/pets/whale-girl/pip.png',
-                  fit: BoxFit.contain,
-                  filterQuality: FilterQuality.medium,
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Text(
-                status,
-                maxLines: 2,
-                textAlign: TextAlign.center,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelMedium,
-              ),
-            ),
-            const SizedBox(height: 6),
-          ],
-        ),
-      ),
-    );
-  }
-
   /// 小窗进出时重画（简版布局和整页是两套）。
   void _onPipChanged() {
     if (mounted) setState(() {});
@@ -592,7 +693,9 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     // 小窗里只留球、一句状态和一个挂断。
     // 这一条要在收起之前：先收起再按 home 时，小窗里显示的应该是小窗自己的样子，
     // 而不是那张底部卡片。
-    if (pictureInPictureMode.value) return _pipView(l10n, theme);
+    if (pictureInPictureMode.value) {
+      return callPipView(l10n: l10n, theme: theme, call: _call, signedIn: ref.read(accountProvider).signedIn);
+    }
     if (_collapsed) return _collapsedCard(l10n, theme);
     _still = AppMotion.reduced(context);
     final settings = ref.watch(callSettingsProvider);
@@ -691,7 +794,7 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
                           live: !ended && _since != null,
                           blur: keyBlur,
                           onTranscript: _openTranscript,
-                          onCollapse: ended ? null : () => setState(() => _collapsed = true),
+                          onCollapse: ended ? null : _collapse,
                           onBackdrop: ended
                               ? null
                               // Trying voices out plays on her speaker: she stops this reply first.
@@ -828,14 +931,14 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   }
 }
 
-/// 收起后的通话卡片。
+/// 收起后的通话卡片：状态一句 + 展开、小窗、挂断三个键。
 ///
-/// 自己拿着位置，自己 setState：拖动只重建这一小棵树，不碰后面那页（那页有整片
-/// 流动的光，重建一次就是压死主线程的代价）。之前把它写在页面里、靠页面的 state
-/// 或外层通知器去推，拖一次就卡住——因为每次重建都新建 GestureDetector，手势
-/// 识别器跟着被销毁重建，拖动就断在那里。
-class _CollapsedCallCard extends StatefulWidget {
-  const _CollapsedCallCard({
+/// 只画卡片自己，不占整屏——挂它的地方各自负责摆放（页面里 [VoiceCallPage]
+/// 折叠时垫一整层，RootGate 的 CallCardLayer 只在底部摆一张）。整屏的
+/// 触摸穿透问题出在路由上，不在卡片上（collapsed_card_hit_test.dart）。
+class CollapsedCallCard extends StatelessWidget {
+  const CollapsedCallCard({
+    super.key,
     required this.status,
     required this.ended,
     required this.l10n,
@@ -854,15 +957,9 @@ class _CollapsedCallCard extends StatefulWidget {
   final VoidCallback onHangUp;
 
   @override
-  State<_CollapsedCallCard> createState() => _CollapsedCallCardState();
-}
-
-class _CollapsedCallCardState extends State<_CollapsedCallCard> {
-
-  @override
   Widget build(BuildContext context) {
-    final ink = widget.theme.colorScheme;
-    final card = Material(
+    final ink = theme.colorScheme;
+    return Material(
       key: const ValueKey('call-collapsed'),
       elevation: 10,
       borderRadius: BorderRadius.circular(22),
@@ -877,57 +974,32 @@ class _CollapsedCallCardState extends State<_CollapsedCallCard> {
             SizedBox(
               width: 132,
               child: Text(
-                widget.status,
+                status,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: widget.theme.textTheme.bodyMedium,
+                style: theme.textTheme.bodyMedium,
               ),
             ),
             IconButton(
               key: const ValueKey('call-expand'),
-              tooltip: widget.l10n.speechCallExpand,
+              tooltip: l10n.speechCallExpand,
               icon: const Icon(Icons.open_in_full, size: 18),
-              onPressed: widget.onExpand,
+              onPressed: onExpand,
             ),
             IconButton(
               key: const ValueKey('call-picture-in-picture'),
-              tooltip: widget.l10n.speechCallPictureInPicture,
+              tooltip: l10n.speechCallPictureInPicture,
               icon: const Icon(Icons.picture_in_picture_alt, size: 18),
-              onPressed: widget.ended ? null : widget.onPip,
+              onPressed: ended ? null : onPip,
             ),
             IconButton(
               key: const ValueKey('call-collapsed-hang-up'),
-              tooltip: widget.l10n.speechCallHangUp,
+              tooltip: l10n.speechCallHangUp,
               icon: Icon(AppIcons.hangUp, size: 20, color: ink.error),
-              onPressed: widget.ended ? null : widget.onHangUp,
+              onPressed: ended ? null : onHangUp,
             ),
           ],
         ),
-      ),
-    );
-    return PopScope(
-      // 收起状态按返回：展开回去，而不是把整通电话丢掉。
-      // 之前返回键直接 pop 掉通话页，通话就没了，这是用户报的那一条。
-      canPop: !widget.ended,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) widget.onExpand();
-      },
-      child: Stack(
-      fit: StackFit.expand,
-      children: [
-        // 这一层把整个屏幕占住但不收任何指针事件：收起时下面的对话页、输入框
-        // 都还要能点。之前用 Align 直接把卡片摆在全屏里，整页看着是空的却把
-        // 所有触摸吃掉了——点哪都没反应就是这么来的。
-        const IgnorePointer(child: SizedBox.expand()),
-        Positioned(
-          left: 16,
-          right: 16,
-          bottom: 20,
-          child: RepaintBoundary(
-            child: Align(alignment: Alignment.center, child: card),
-          ),
-        ),
-      ],
       ),
     );
   }

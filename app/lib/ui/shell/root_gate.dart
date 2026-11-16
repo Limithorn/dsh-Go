@@ -22,6 +22,7 @@ import '../../state/notify_state.dart';
 import '../../state/ohos_linux_state.dart';
 import '../../state/onboarding_state.dart';
 import '../../state/settings_state.dart';
+import '../../state/voice_call_host.dart' show CallCardLayer;
 import '../../ui_config/ui_skill.dart';
 import '../../usage/usage_stats.dart';
 import '../onboarding/onboarding_flow.dart';
@@ -419,13 +420,18 @@ class _RootGateState extends ConsumerState<RootGate> {
         launch.ready(waitsForEngine: ref.read(activeHostProvider).isLocal);
       });
     }
-    return AnimatedSwitcher(
-      duration: AppMotion.of(context, AppMotion.page),
-      switchInCurve: AppMotion.enter,
-      switchOutCurve: AppMotion.exit,
-      child: KeyedSubtree(
-        key: ValueKey(child is _Splash ? 'splash' : (_step == null ? 'home' : 'onboarding')),
-        child: child,
+    return CallCardLayer(
+      // 收起的通话卡片挂在这里（state/voice_call_host.dart）：在一切页面之上、
+      // 在任何 push 上去的路由之下——整页的通话页盖得住它，收起后它浮在
+      // 别的页面上，而且只有卡片自己收触摸。
+      child: AnimatedSwitcher(
+        duration: AppMotion.of(context, AppMotion.page),
+        switchInCurve: AppMotion.enter,
+        switchOutCurve: AppMotion.exit,
+        child: KeyedSubtree(
+          key: ValueKey(child is _Splash ? 'splash' : (_step == null ? 'home' : 'onboarding')),
+          child: child,
+        ),
       ),
     );
   }
