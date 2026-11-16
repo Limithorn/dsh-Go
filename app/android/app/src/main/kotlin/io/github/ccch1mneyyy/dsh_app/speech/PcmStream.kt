@@ -1,7 +1,10 @@
 package io.github.ccch1mneyyy.dsh_app.speech
 
+import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTrack
 import android.os.Build
 import android.os.Handler
@@ -32,6 +35,7 @@ class PcmStream(
     private val levels: Boolean,
     private val main: Handler,
     private val listener: Listener,
+    private val context: Context? = null,
 ) {
     interface Listener {
         fun onStart(stream: PcmStream)
@@ -54,6 +58,23 @@ class PcmStream(
     /** Heard or about to be: the track has started. */
     @Volatile var started = false
         private set
+
+    /**
+     * 免提开关：让声音走扬声器或听筒。
+     *
+     * 不能靠 AudioManager 的通话路由（那个要 MODIFY_AUDIO_SETTINGS，本项目有意移除了），
+     * 而是给这条 AudioTrack 指定一个输出设备：setPreferredDevice 不需要那个权限。
+     */
+    fun setSpeaker(on: Boolean) {
+        val ctx = context ?: return
+        val t = track ?: return
+        val am = ctx.getSystemService(AudioManager::class.java) ?: return
+        val want = if (on) AudioDeviceInfo.TYPE_BUILTIN_SPEAKER else AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+        val target = runCatching {
+            am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type == want }
+        }.getOrNull() ?: return
+        runCatching { t.preferredDevice = target }
+    }
 
     fun open(): Boolean {
         val min = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)

@@ -145,6 +145,9 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
             "callSpeaker" -> {
                 speaker = call.argument<Boolean>("on") != false
                 if (capture != null) route()
+                // 语音回复的音频走媒体通道，AudioManager 的通话路由管不到它；
+                // 直接告诉播放这条流换输出设备，免提键才真的有反应。
+                stream?.setSpeaker(speaker)
                 result.success(speaker)
             }
             else -> result.notImplemented()
@@ -159,7 +162,7 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
         val forCall = call.argument<Boolean>("call") == true
         val levels = call.argument<Boolean>("levels") == true
         stream?.stop()
-        val s = PcmStream(id, rate, forCall, levels, main, streamListener)
+        val s = PcmStream(id, rate, forCall, levels, main, streamListener, context)
         if (!s.open()) return false
         stream = s
         if (!forCall && !requestFocus()) {
