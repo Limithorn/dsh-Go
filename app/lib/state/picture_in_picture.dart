@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// 通话页的跨应用形态：把整个 App 缩成系统窗口（画中画），通话继续。
@@ -30,7 +31,32 @@ Future<bool> enterPictureInPicture() async {
   }
 }
 
-/// 告诉原生现在是不是在通话。
+/// 现在是不是在画中画小窗里。
+///
+/// 小窗只有巴掌大，整页缩进去按钮会挤成一团，所以通话页需要知道这件事，
+/// 在里面换一套只留球、状态和挂断的布局。
+final pictureInPictureMode = ValueNotifier<bool>(false);
+
+bool _watching = false;
+
+/// 开始听原生的画中画进出事件（通话页起来时调一次）。
+void watchPictureInPicture() {
+  if (_watching) return;
+  _watching = true;
+  _channel.setMethodCallHandler((call) async {
+    if (call.method == 'pictureInPictureChanged') {
+      pictureInPictureMode.value = call.arguments as bool? ?? false;
+    }
+  });
+}
+
+/// 通话页离开时停掉，不把通道占着。
+void stopWatchingPictureInPicture() {
+  if (!_watching) return;
+  _watching = false;
+  _channel.setMethodCallHandler(null);
+  pictureInPictureMode.value = false;
+}
 ///
 /// 通话中按 home 或切走时，原生会直接缩成小窗，而不是退到后台——
 /// 后台麦克风会被系统掉，通话就断了。

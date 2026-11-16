@@ -144,6 +144,8 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     WidgetsBinding.instance.addObserver(this);
     // 通话期间告诉原生：按 home 不要退到后台，直接缩成小窗，麦克风才不被挖。
     unawaited(setCallActive(true));
+    watchPictureInPicture();
+    pictureInPictureMode.addListener(_onPipChanged);
     final callSettings = ref.read(callSettingsProvider.notifier);
     final voices = ref.read(speechVoiceSettingsProvider.notifier);
     // The chosen voice, as soon as the settings have been read (the first reply comes later).
@@ -424,6 +426,8 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     unawaited(setCallActive(false));
+    pictureInPictureMode.removeListener(_onPipChanged);
+    stopWatchingPictureInPicture();
     unawaited(_live?.stop());
     _leave?.cancel();
     _enter.dispose();
@@ -563,10 +567,71 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     unawaited(showCallTranscript(context, _call));
   }
 
-  @override
+  /// 画中画小窗里的样子：一球、一句状态、一个挂断。
+  ///
+  /// 小窗是方的、宽度只有屏幕的三分之一，整页缩进去会挤成一片，所以单独排：
+  /// 球占上方，状态压在它下面，挂断固定在底部中央，Grand 手势和点击区域都留够。
+  Widget _pipView(L10n l10n, ThemeData theme) {
+    final (status, _) = _status(l10n);
+    final ended = _call.phase == CallPhase.ended;
+    final ink = theme.colorScheme;
+    return ColoredBox(
+      color: ink.surface,
+      child: SafeArea(
+        minimum: const EdgeInsets.all(10),
+        child: Column(
+          children: [
+            Expanded(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 96, maxHeight: 96),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [ink.primary.withValues(alpha: 0.85), ink.primary.withValues(alpha: 0.15)],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Text(
+                status,
+                maxLines: 2,
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall,
+              ),
+            ),
+            const SizedBox(height: 8),
+            IconButton.filledTonal(
+              key: const ValueKey('call-pip-hang-up'),
+              tooltip: l10n.speechCallHangUp,
+              onPressed: ended ? null : _hangUp,
+              icon: Icon(AppIcons.hangUp, size: 20, color: ink.error),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 小窗进出时重画（简版布局和整页是两套）。
+  void _onPipChanged() {
+    if (mounted) setState(() {});
+  }
+
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final theme = Theme.of(context);
+    // 画中画只有巴掌大，塞整页会把球、字幕、一排按钮挤成一团；
+    // 小窗里只留球、一句状态和一个挂断。
+    // 这一条要在收起之前：先收起再按 home 时，小窗里显示的应该是小窗自己的样子，
+    // 而不是那张底部卡片。
+    if (pictureInPictureMode.value) return _pipView(l10n, theme);
     if (_collapsed) return _collapsedCard(l10n, theme);
     _still = AppMotion.reduced(context);
     final settings = ref.watch(callSettingsProvider);
