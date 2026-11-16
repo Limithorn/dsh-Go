@@ -848,8 +848,8 @@ class _CollapsedCallCardState extends State<_CollapsedCallCard> {
           children: [
             Icon(AppIcons.voice, size: 18, color: ink.primary),
             const SizedBox(width: 10),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 170),
+            SizedBox(
+              width: 132,
               child: Text(
                 widget.status,
                 maxLines: 1,
@@ -879,17 +879,29 @@ class _CollapsedCallCardState extends State<_CollapsedCallCard> {
         ),
       ),
     );
-    return Align(
-      alignment: Alignment.bottomCenter,
-      child: SafeArea(
-        minimum: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-        // 不做拖动了。
-        //
-        // 拖这件事前后试了四版：整页 setState、独立通知器、抽成组件、
-        // 长按才拖。每版都是按住能拖、一松手整页僵住，RepaintBoundary
-        // 也没救回来。根因没找到之前，与其让它拖完就死，不如先钉在底部：
-        // 要挪位置就点小窗键进画中画，那条路是好的。
-        child: RepaintBoundary(child: card),
+    return PopScope(
+      // 收起状态按返回：展开回去，而不是把整通电话丢掉。
+      // 之前返回键直接 pop 掉通话页，通话就没了，这是用户报的那一条。
+      canPop: !widget.ended,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) widget.onExpand();
+      },
+      child: Stack(
+      fit: StackFit.expand,
+      children: [
+        // 这一层把整个屏幕占住但不收任何指针事件：收起时下面的对话页、输入框
+        // 都还要能点。之前用 Align 直接把卡片摆在全屏里，整页看着是空的却把
+        // 所有触摸吃掉了——点哪都没反应就是这么来的。
+        const IgnorePointer(child: SizedBox.expand()),
+        Positioned(
+          left: 16,
+          right: 16,
+          bottom: 20,
+          child: RepaintBoundary(
+            child: Align(alignment: Alignment.center, child: card),
+          ),
+        ),
+      ],
       ),
     );
   }
