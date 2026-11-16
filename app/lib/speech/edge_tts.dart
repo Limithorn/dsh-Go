@@ -166,6 +166,8 @@ Future<Uint8List> edgeSpeak(
   String voice = edgeDefaultVoice,
   String rate = '+10%',
   String pitch = '+0Hz',
+  // 服务那边默认出声偏小，手机外放和听简都显轻；抬到听得清又不到削波。
+  String volume = '+40%',
   Duration timeout = const Duration(seconds: 30),
 }) async {
   final clean = text.trim();
@@ -291,7 +293,7 @@ Future<Uint8List> edgeSpeak(
       'X-Timestamp:${stamp}Z\r\n'
       'Path:ssml\r\n\r\n'
       "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='$lang'>"
-      "<voice name='$voice'><prosody pitch='$pitch' rate='$rate' volume='+0%'>"
+      "<voice name='$voice'><prosody pitch='$pitch' rate='$rate' volume='$volume'>"
       '$escaped'
       '</prosody></voice></speak>',
     );

@@ -144,6 +144,8 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // 通话期间告诉原生：按 home 不要退到后台，直接缩成小窗，麦克风才不被挖。
+    unawaited(setCallActive(true));
     final callSettings = ref.read(callSettingsProvider.notifier);
     final voices = ref.read(speechVoiceSettingsProvider.notifier);
     // The chosen voice, as soon as the settings have been read (the first reply comes later).
@@ -443,6 +445,7 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    unawaited(setCallActive(false));
     unawaited(_live?.stop());
     _leave?.cancel();
     _enter.dispose();
