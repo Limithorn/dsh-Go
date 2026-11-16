@@ -69,3 +69,14 @@ Future<void> setCallActive(bool active) async {
     // 同上。
   }
 }
+
+/// 通话时的屏幕行为：锁竖屏，并让手机贴到耳边就熄屏（挂断时传 false 撤销）。
+Future<void> setCallScreen(bool active) async {
+  try {
+    await _channel.invokeMethod<void>('setCallScreen', {'on': active});
+  } on PlatformException {
+    // 同上。
+  } on MissingPluginException {
+    // 同上。
+  }
+}
