@@ -278,6 +278,22 @@ class MainActivity : FlutterActivity() {
                     val on = call.argument<Boolean>("on") ?: false
                     if (on) {
                         runCatching { requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
+                        // 锁屏时也要能亮起来把通话页显出来（唤醒词在锁屏时叫醒要靠它们），
+                        // 否则 bringToFront 被锁屏挡住，看起来就是「锁屏不能唤醒」。
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                            runCatching {
+                                setShowWhenLocked(true)
+                                setTurnScreenOn(true)
+                            }
+                        } else {
+                            @Suppress("DEPRECATION")
+                            runCatching {
+                                window.addFlags(
+                                    android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                        android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
+                                )
+                            }
+                        }
                         if (proxWake == null) {
                             runCatching {
                                 val pm = getSystemService(PowerManager::class.java)
@@ -292,6 +308,12 @@ class MainActivity : FlutterActivity() {
                         }
                     } else {
                         runCatching { requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                            runCatching {
+                                setShowWhenLocked(false)
+                                setTurnScreenOn(false)
+                            }
+                        }
                         runCatching { proxWake?.release() }
                         proxWake = null
                     }

@@ -164,6 +164,9 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
         stream?.stop()
         val s = PcmStream(id, rate, forCall, levels, main, streamListener, context)
         if (!s.open()) return false
+        // 开流时就按当前的免提状态把输出设备定下来：免提键往往在她不说话时按，
+        // 那时 stream 还是 null，只靠 callSpeaker 里的那一次会落空。
+        if (forCall) s.setSpeaker(speaker)
         stream = s
         if (!forCall && !requestFocus()) {
             s.stop()
