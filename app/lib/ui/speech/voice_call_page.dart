@@ -355,10 +355,12 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 画中画里、或者锁屏上盖着但还在通话：都不算退后台。
-    // Android 只在真正不可见时掉麦克风，这两种情况麦克风仍在前台服务名下。
-    if (pictureInPictureMode.value || callScreenLocked.value) return;
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) _call.backgrounded();
+    // 不再因「切到后台」主动结束通话。
+    //
+    // 之前锁屏叫醒后一秒就退：锁屏时 Flutter 报 paused，而这里的背景判断
+    // 比原生那条「这是锁屏」的消息先到，总是先把通话收了。麦克风在画中画和
+    // 锁屏下都还活（前台服务撑着），所以交给系统去决定，不再自己判。
+    // 真正不可用时，采集会报 mic_busy，那条路会如实结束。
   }
 
   @override
@@ -830,15 +832,10 @@ class _CollapsedCallCard extends StatefulWidget {
 }
 
 class _CollapsedCallCardState extends State<_CollapsedCallCard> {
-  Offset _drag = Offset.zero;
-
-  /// 长按开始时的位置；拖动过程中按增量算，不累积误差。
-  Offset _origin = Offset.zero;
 
   @override
   Widget build(BuildContext context) {
     final ink = widget.theme.colorScheme;
-    final screen = MediaQuery.sizeOf(context);
     final card = Material(
       key: const ValueKey('call-collapsed'),
       elevation: 10,
@@ -886,34 +883,13 @@ class _CollapsedCallCardState extends State<_CollapsedCallCard> {
       alignment: Alignment.bottomCenter,
       child: SafeArea(
         minimum: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-        child: Transform.translate(
-          offset: _drag,
-          child: GestureDetector(
-            // 长按才拖，短按照常点按钮。
-            //
-            // 之前用 onPanUpdate：拖完松手就僵。手指按住时不卡、一松手才卡，
-            // 说明问题在手势结束那一步——pan 和卡片上的 IconButton 的 tap
-            // 在竞技场里结算，松手那一帧才真正分出胜负。改成只认长按移动，
-            // 两条手势从一开始就分开，不会在结束时撞在一起。
-            onLongPressStart: (_) => _origin = _drag,
-            onLongPressMoveUpdate: (details) {
-              final half = screen.width / 2 - 150;
-              final up = screen.height - 180;
-              final next = _origin + details.offsetFromOrigin;
-              setState(() {
-                _drag = Offset(
-                  next.dx.clamp(-half, half),
-                  next.dy.clamp(-up, 0),
-                );
-              });
-            },
-            child: RepaintBoundary(
-              // 卡片有 elevation 阴影，拖动时每帧重绘阴影会把 raster 线程拖垮，
-              // 松手后那一帧卡在那里就像死了。隔成一个独立图层，只重绘自己。
-              child: card,
-            ),
-          ),
-        ),
+        // 不做拖动了。
+        //
+        // 拖这件事前后试了四版：整页 setState、独立通知器、抽成组件、
+        // 长按才拖。每版都是按住能拖、一松手整页僵住，RepaintBoundary
+        // 也没救回来。根因没找到之前，与其让它拖完就死，不如先钉在底部：
+        // 要挪位置就点小窗键进画中画，那条路是好的。
+        child: RepaintBoundary(child: card),
       ),
     );
   }

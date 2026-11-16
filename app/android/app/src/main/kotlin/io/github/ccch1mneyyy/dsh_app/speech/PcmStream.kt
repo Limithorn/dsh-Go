@@ -59,13 +59,18 @@ class PcmStream(
     @Volatile var started = false
         private set
 
+    /** 免提开着吗。建流时按它定输出设备，之后 callSpeaker 改。 */
+    @Volatile private var speakerOn = true
+
     /**
      * 免提开关：让声音走扬声器或听筒。
      *
      * 不能靠 AudioManager 的通话路由（那个要 MODIFY_AUDIO_SETTINGS，本项目有意移除了），
-     * 而是给这条 AudioTrack 指定一个输出设备：setPreferredDevice 不需要那个权限。
+     * 而是给这条 AudioTrack 指定输出设备：setPreferredDevice 不需要那个权限。
+     * 必须在 play() 之前设，播到一半再改会被忽略——这是之前按了没反应的原因。
      */
     fun setSpeaker(on: Boolean) {
+        speakerOn = on
         val ctx = context ?: return
         val t = track ?: return
         val am = ctx.getSystemService(AudioManager::class.java) ?: return
@@ -110,6 +115,9 @@ class PcmStream(
         // Start playing after 100 ms of audio, not a whole buffer (Android 12+).
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) runCatching { t.setStartThresholdInFrames(rate / 10) }
         track = t
+        // 在 play() 之前把输出设备定下来（run 线程里才 play）。
+        // 播到一半再改会被系统忽略，这是免提键之前按了没反应的真正原因。
+        if (call) setSpeaker(speakerOn)
         thread = Thread({ run(t) }, "dsh-speech-pcm").also { it.start() }
         return true
     }
