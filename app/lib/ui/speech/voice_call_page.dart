@@ -546,12 +546,21 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
           children: [
             Expanded(
               child: Center(
-                child: Image.asset(
-                  'assets/pets/whale-girl/idle.png',
-                  width: 72,
-                  height: 72,
-                  fit: BoxFit.contain,
-                  filterQuality: FilterQuality.medium,
+                // idle.png 是一张 13 帧的横向精灵条（676x49，每帧 52x49），
+                // 直接当图片画出来就是“一排小人”。只取第一帧：Align 的
+                // widthFactor 把宽度压到 1/13，外面再 ClipRect 剪掉其余。
+                child: ClipRect(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: 1 / 13,
+                    child: Image.asset(
+                      'assets/pets/whale-girl/idle.png',
+                      width: 52 * 1.6,
+                      height: 49 * 1.6,
+                      fit: BoxFit.contain,
+                      filterQuality: FilterQuality.medium,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -853,6 +862,9 @@ class _CollapsedCallCard extends StatefulWidget {
 class _CollapsedCallCardState extends State<_CollapsedCallCard> {
   Offset _drag = Offset.zero;
 
+  /// 长按开始时的位置；拖动过程中按增量算，不累积误差。
+  Offset _origin = Offset.zero;
+
   @override
   Widget build(BuildContext context) {
     final ink = widget.theme.colorScheme;
@@ -907,15 +919,21 @@ class _CollapsedCallCardState extends State<_CollapsedCallCard> {
         child: Transform.translate(
           offset: _drag,
           child: GestureDetector(
-            // 卡片自己动，上面的键照样点得到。
-            onPanUpdate: (details) {
-              // 位置限在屏幕里：拖出可视区就再也搔不到。
+            // 长按才拖，短按照常点按钮。
+            //
+            // 之前用 onPanUpdate：拖完松手就僵。手指按住时不卡、一松手才卡，
+            // 说明问题在手势结束那一步——pan 和卡片上的 IconButton 的 tap
+            // 在竞技场里结算，松手那一帧才真正分出胜负。改成只认长按移动，
+            // 两条手势从一开始就分开，不会在结束时撞在一起。
+            onLongPressStart: (_) => _origin = _drag,
+            onLongPressMoveUpdate: (details) {
               final half = screen.width / 2 - 150;
               final up = screen.height - 180;
+              final next = _origin + details.offsetFromOrigin;
               setState(() {
                 _drag = Offset(
-                  (_drag.dx + details.delta.dx).clamp(-half, half),
-                  (_drag.dy + details.delta.dy).clamp(-up, 0),
+                  next.dx.clamp(-half, half),
+                  next.dy.clamp(-up, 0),
                 );
               });
             },
