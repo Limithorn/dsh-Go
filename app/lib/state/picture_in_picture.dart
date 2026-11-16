@@ -37,6 +37,10 @@ Future<bool> enterPictureInPicture() async {
 /// 在里面换一套只留球、状态和挂断的布局。
 final pictureInPictureMode = ValueNotifier<bool>(false);
 
+/// 通话中锁着屏：界面被锁屏盖住，但麦克风还在（前台服务撑着）。
+/// 这种时候不算「切到后台」，否则锁屏叫醒后通话马上就结束了。
+final callScreenLocked = ValueNotifier<bool>(false);
+
 bool _watching = false;
 
 /// 开始听原生的画中画进出事件（通话页起来时调一次）。
@@ -46,6 +50,8 @@ void watchPictureInPicture() {
   _channel.setMethodCallHandler((call) async {
     if (call.method == 'pictureInPictureChanged') {
       pictureInPictureMode.value = call.arguments as bool? ?? false;
+    } else if (call.method == 'callScreenLocked') {
+      callScreenLocked.value = call.arguments as bool? ?? false;
     }
   });
 }
@@ -56,6 +62,7 @@ void stopWatchingPictureInPicture() {
   _watching = false;
   _channel.setMethodCallHandler(null);
   pictureInPictureMode.value = false;
+  callScreenLocked.value = false;
 }
 ///
 /// 通话中按 home 或切走时，原生会直接缩成小窗，而不是退到后台——

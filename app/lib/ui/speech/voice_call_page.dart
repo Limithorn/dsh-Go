@@ -377,6 +377,9 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 画中画里、或者锁屏上盖着但还在通话：都不算退后台。
+    // Android 只在真正不可见时掉麦克风，这两种情况麦克风仍在前台服务名下。
+    if (pictureInPictureMode.value || callScreenLocked.value) return;
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) _call.backgrounded();
   }
 
@@ -546,21 +549,12 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
           children: [
             Expanded(
               child: Center(
-                // idle.png 是一张 13 帧的横向精灵条（676x49，每帧 52x49），
-                // 直接当图片画出来就是“一排小人”。只取第一帧：Align 的
-                // widthFactor 把宽度压到 1/13，外面再 ClipRect 剪掉其余。
-                child: ClipRect(
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    widthFactor: 1 / 13,
-                    child: Image.asset(
-                      'assets/pets/whale-girl/idle.png',
-                      width: 52 * 1.6,
-                      height: 49 * 1.6,
-                      fit: BoxFit.contain,
-                      filterQuality: FilterQuality.medium,
-                    ),
-                  ),
+                // 小窗里用贴纸立绘（pip.png，384x519）；精灵条那几张是一排帧，
+                // 缩到小窗里只剩几个像素，看不出是谁。
+                child: Image.asset(
+                  'assets/pets/whale-girl/pip.png',
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.medium,
                 ),
               ),
             ),
@@ -937,7 +931,11 @@ class _CollapsedCallCardState extends State<_CollapsedCallCard> {
                 );
               });
             },
-            child: card,
+            child: RepaintBoundary(
+              // 卡片有 elevation 阴影，拖动时每帧重绘阴影会把 raster 线程拖垮，
+              // 松手后那一帧卡在那里就像死了。隔成一个独立图层，只重绘自己。
+              child: card,
+            ),
           ),
         ),
       ),
