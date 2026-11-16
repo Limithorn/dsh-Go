@@ -4,7 +4,9 @@ import android.app.PictureInPictureParams
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.os.PowerManager
 import android.util.Rational
 import android.content.res.Configuration
 import android.graphics.Color
@@ -270,6 +272,31 @@ class MainActivity : FlutterActivity() {
                 // system or the device does not allow it.
                 "enterPictureInPicture" -> result.success(enterPip())
                 // 通话页告诉原生现在是不是在通话，按 home 时据此决定要不要缩成小窗。
+                // 通话页的屏幕行为：锁竖屏（通话时转横屏只会让按钮错位），
+                // 并持一个 PROXIMITY_SCREEN_OFF 唤醒锁——手机贴到耳边就熄屏。
+                "setCallScreen" -> {
+                    val on = call.argument<Boolean>("on") ?: false
+                    if (on) {
+                        runCatching { requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
+                        if (proxWake == null) {
+                            runCatching {
+                                val pm = getSystemService(PowerManager::class.java)
+                                proxWake = pm?.newWakeLock(
+                                    PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,
+                                    "dsh:call-proximity",
+                                )?.apply {
+                                    setReferenceCounted(false)
+                                    acquire()
+                                }
+                            }
+                        }
+                    } else {
+                        runCatching { requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
+                        runCatching { proxWake?.release() }
+                        proxWake = null
+                    }
+                    result.success(null)
+                }
                 "setCallActive" -> {
                     callActive = call.argument<Boolean>("active") ?: false
                     // Android 12 起该用 autoEnter：事先告诉系统「我在通话」，
@@ -315,6 +342,9 @@ class MainActivity : FlutterActivity() {
     /// 正在语音通话（由 Dart 侧的 call setCallActive 告知），
     /// 按 home 时据此决定是否缩成画中画。
     private var callActive = false
+
+    /// 通话时屏幕靠近脸就熄（耗电和误触都省了），挂断释放。
+    private var proxWake: PowerManager.WakeLock? = null
 
     companion object {
         private const val ENGINE_ID = "dsh-main"

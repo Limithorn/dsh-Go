@@ -140,6 +140,7 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     WidgetsBinding.instance.addObserver(this);
     // 通话期间告诉原生：按 home 不要退到后台，直接缩成小窗，麦克风才不被挖。
     unawaited(setCallActive(true));
+    unawaited(setCallScreen(true));
     watchPictureInPicture();
     pictureInPictureMode.addListener(_onPipChanged);
     final callSettings = ref.read(callSettingsProvider.notifier);
@@ -361,6 +362,7 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     unawaited(setCallActive(false));
+    unawaited(setCallScreen(false));
     pictureInPictureMode.removeListener(_onPipChanged);
     stopWatchingPictureInPicture();
     unawaited(_live?.stop());
@@ -507,8 +509,10 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   /// 球占上方，状态压在它下面，挂断固定在底部中央，Grand 手势和点击区域都留够。
   Widget _pipView(L10n l10n, ThemeData theme) {
     final (status, _) = _status(l10n);
-    final ended = _call.phase == CallPhase.ended;
     final ink = theme.colorScheme;
+    // 小窗里不做可点的控件：Android 把小窗里的单击拿去展开系统控制，双击才回 App，
+    // 按钮画得再好也点不到。所以小窗只负责「让人一眼看出还在通话」：
+    // 宠物 + 一句状态，想操作就双击回 App。
     return ColoredBox(
       color: ink.surface,
       child: SafeArea(
@@ -516,22 +520,17 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // 球要有真实尺寸：DecoratedBox 没 child 时会塔成 0，之前小窗里
-            // 只剩文字和挂断、球不见了，就是这个原因。
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    ink.primary.withValues(alpha: 0.9),
-                    ink.primary.withValues(alpha: 0.25),
-                  ],
+            Expanded(
+              child: Center(
+                child: Image.asset(
+                  'assets/pets/whale-girl/idle.png',
+                  width: 72,
+                  height: 72,
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.medium,
                 ),
               ),
             ),
-            const SizedBox(height: 10),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Text(
@@ -539,21 +538,10 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
                 maxLines: 2,
                 textAlign: TextAlign.center,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelSmall,
+                style: theme.textTheme.labelMedium,
               ),
             ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: 44,
-              height: 44,
-              child: IconButton.filledTonal(
-                key: const ValueKey('call-pip-hang-up'),
-                padding: EdgeInsets.zero,
-                tooltip: l10n.speechCallHangUp,
-                onPressed: ended ? null : _hangUp,
-                icon: Icon(AppIcons.hangUp, size: 20, color: ink.error),
-              ),
-            ),
+            const SizedBox(height: 6),
           ],
         ),
       ),
@@ -565,6 +553,7 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     if (mounted) setState(() {});
   }
 
+  @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final theme = Theme.of(context);
