@@ -131,6 +131,8 @@ class MainActivity : FlutterActivity() {
         // Coming back counts as activity: the first frames may not be scheduled yet.
         framesActive = true
         applyRefreshRate()
+        // 锁屏回来了：从「锁屏不算后台」改回正常判断。
+        appChannel?.invokeMethod("callScreenLocked", false)
     }
 
     /**
@@ -190,7 +192,16 @@ class MainActivity : FlutterActivity() {
 
     override fun onPause() {
         inForeground = false
-        // 画中画里不能停帧：小窗是活的，停帧就是画面定在那儿不动（之前『卡住』就这样）。
+        // 通话中锁屏：Activity 被盖住了，但麦克风还在（麦克风类型的前台服务撑着）。
+        // 告诉 Dart 这种情况不算「切到后台」，否则通话会自己结束——
+        // 之前锁屏叫醒后界面刚出来、一秒就退，就是这个。
+        if (callActive) {
+            val locked = runCatching {
+                getSystemService(android.app.KeyguardManager::class.java)?.isKeyguardLocked == true
+            }.getOrDefault(false)
+            if (locked) appChannel?.invokeMethod("callScreenLocked", true)
+        }
+        // 画中画里不能停帧：小窗是活的，停帧就是画面定在那儿不动。
         if (!isInPictureInPictureMode) {
             framesActive = false
             applyRefreshRate()
