@@ -13,12 +13,43 @@ import '../../state/hosts_state.dart';
 import '../../state/notify_state.dart';
 import 'voice_call.dart';
 
+/// The conversation a call belongs to, resolved once and then held.
+///
+/// The page that opened the call can go away (收起 pops its route, 画中画
+/// rebuilds the tree): a callback that reads that page's `mounted` or its
+/// draft then starts answering null, and every spoken sentence is lost with
+/// 「没发出去，再说一次」. A successful id is the call's, for good.
+class PinnedSession {
+  PinnedSession(this._resolve);
+
+  final Future<String?> Function() _resolve;
+  Future<String?>? _inFlight;
+  String? _id;
+
+  /// A successful id belongs to the call for good. The page that answered
+  /// can be gone (收起, 画中画, a draft switch) — asking it again would only
+  /// answer null and lose every sentence with 「没发出去，再说一次」.
+  /// A miss is not pinned: the next turn may settle it.
+  Future<String?> id() {
+    final pinned = _id;
+    if (pinned != null) return Future<String?>.value(pinned);
+    return _inFlight ??= _resolve().then((value) {
+      if (value != null) _id = value;
+      _inFlight = null;
+      return value;
+    });
+  }
+}
+
 class ChatCallConversation implements CallConversation {
   /// [session] gives the conversation's id, creating it for a new chat.
-  ChatCallConversation(this._container, this._session);
+  /// Asked at most once successfully: the call keeps the conversation it
+  /// began in, even if the page that opened it is gone.
+  ChatCallConversation(this._container, Future<String?> Function() session)
+    : _pinned = PinnedSession(session);
 
   final ProviderContainer _container;
-  final Future<String?> Function() _session;
+  final PinnedSession _pinned;
   final _replies = StreamController<CallReply>.broadcast();
   ProviderSubscription<ChatState>? _sub;
   String? _id;
@@ -56,7 +87,7 @@ class ChatCallConversation implements CallConversation {
 
   @override
   Future<bool> send(String text) async {
-    final id = await _session();
+    final id = await _pinned.id();
     // The call ended while its conversation was made: nothing to follow.
     if (id == null || _disposed) return false;
     _follow(id);

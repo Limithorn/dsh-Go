@@ -156,6 +156,11 @@ class VoiceCallController extends ChangeNotifier {
   Object? _error;
   bool _hinted = false;
 
+  /// A sentence the conversation did not take yet. Kept verbatim: the person
+  /// should not have to say it again just because the conversation was not
+  /// ready for it (a new chat still being made, the opening page gone).
+  ({String text, int token})? _pendingSend;
+
   /// The person began speaking over her: she is quieter until it is known what they said.
   bool _over = false;
   Timer? _overTimer;
@@ -424,8 +429,39 @@ class VoiceCallController extends ChangeNotifier {
       _set(CallPhase.thinking);
     }
     final sent = await conversation.send(message);
-    if (_phase == CallPhase.ended) return;
+    if (_phase == CallPhase.ended || _disposed) return;
     if (!sent) {
+      // 「没发出去，再说一次」 used to be said at once, and then again for
+      // every bit of noise the microphone picked up. The words are already
+      // here: hold them and offer them to the conversation again. Only a
+      // long string of refusals is a real failure worth saying out loud.
+      _pendingSend = (text: message, token: mine);
+      _replyDone = true;
+      _set(CallPhase.listening);
+      unawaited(_retrySend());
+      return;
+    }
+  }
+
+  /// Offers a held sentence again while the conversation settles (a new chat
+  /// being created, a sync still running, the page that opened the call gone).
+  /// Stops as soon as it is taken, the call ends, or the person says something
+  /// new — never two copies of one turn, never a stale reply.
+  Future<void> _retrySend() async {
+    for (var attempt = 0; attempt < 12; attempt++) {
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      final pending = _pendingSend;
+      if (pending == null || _disposed || _phase == CallPhase.ended || pending.token != _recognizing) return;
+      _replyDone = false;
+      final ok = await conversation.send(pending.text);
+      if (pending != _pendingSend || _disposed || _phase == CallPhase.ended) return;
+      if (ok) {
+        _pendingSend = null;
+        return;
+      }
+    }
+    if (_pendingSend != null && !_disposed && _phase != CallPhase.ended) {
+      _pendingSend = null;
       _replyDone = true;
       _error = const CallSendFailed();
       _set(CallPhase.listening);

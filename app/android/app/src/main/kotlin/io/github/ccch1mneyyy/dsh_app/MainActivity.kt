@@ -390,7 +390,14 @@ class MainActivity : FlutterActivity() {
 
     // Back on the home screen sends the app to the background instead of finishing the activity
     // (Android 12's default for launcher roots): coming back finds it as it was.
-    override fun popSystemNavigator(): Boolean = moveTaskToBack(true)
+    // A call must not go to the background that way: the back key does not fire
+    // onUserLeaveHint, so autoEnter never runs, the microphone is taken away and
+    // every spoken sentence fails to reach the conversation afterwards. Dart
+    // asks for PiP itself when 收起; this is the fallback for any other pop.
+    override fun popSystemNavigator(): Boolean {
+        if (callActive && enterPip()) return true
+        return moveTaskToBack(true)
+    }
 
     /** Flutter produced a frame recently (see RefreshRateService): auto mode follows it. */
     private var framesActive = true
