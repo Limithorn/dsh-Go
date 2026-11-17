@@ -12103,7 +12103,14 @@
   "speechInsecure": "这个云端服务的地址不是 https，Key 不能这样发出去",
   "wakeSectionTitle": "唤醒词",
   "wakeToggle": "叫它就醒来",
-  "wakeToggleHint": "说「你好米」直接开始通话",
+  "wakeToggleHint": "说「{word}」直接开始通话",
+  "@wakeToggleHint": {
+    "placeholders": {
+      "word": {
+        "type": "String"
+      }
+    }
+  },
   "wakeToggleOn": "在听你叫它",
   "wakeSectionFooter": "开着的时候麦克风一直占着，通知栏会有一条提示。后台能听声音，是因为挂了一条麦克风类型的前台服务；关掉就停。",
   "wakeProblemMicBusy": "麦克风被别的应用占着",

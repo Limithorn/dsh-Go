@@ -618,6 +618,11 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   /// over on the RootGate and the call carries on. A page that owns its call
   /// (tests): fold itself into a card in place, as before.
   void _collapse() {
+    // 锁屏亮屏时整页浮在 keyguard 之上；收起前先让原生判断"现在锁着屏吗"，
+    // 是就撤掉 showWhenLocked，keyguard 立刻盖上来——一次返回直接回锁屏，
+    // 解锁后看到的是已收起的对话页，而不是先闪一下对话页再按一次才锁屏。
+    // 非锁屏时原生什么都不做，照常收成卡片继续聊。
+    unawaited(leaveCallToLock());
     if (widget.onCollapse case final hosted?) {
       _collapsing = true;
       hosted(context);
