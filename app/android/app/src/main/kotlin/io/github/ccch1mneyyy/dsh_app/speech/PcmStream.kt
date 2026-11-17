@@ -63,6 +63,7 @@ class PcmStream(
     /** 免提开着吗。建流时按它定使用与输出设备，之后 callSpeaker 改。 */
     @Volatile private var speakerOn = startOnSpeaker
 
+
     /**
      * 免提开关：让声音走扬声器或听筒。
      *
@@ -94,20 +95,32 @@ class PcmStream(
         return device == null || device.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
     }
 
+    /**
+     * 通话页里由音量键调的增益（0..1），与系统任何一条音量流无关。
+     *
+     * 为什么不用系统音量：Pixel 的音频策略把这条 AudioTrack 的增益并进了媒体组，
+     * 即使 usage=VOICE_COMMUNICATION，通话音量 7 和 1 的输出功率都是 -33.0 dB。
+     * AOSP 源码也写明 usage 只决定「音量键调哪条流」，不决定播放增益。
+     * 所以通话页自己拦 VOLUME_UP/DOWN，直接改这条轨的增益（官方文档
+     * Controlling Your App's Volume and Playback 里推荐的做法）。
+     */
+    fun setGain(gain: Float) {
+        runCatching { track?.setVolume(gain.coerceIn(0f, 1f)) }
+    }
+
     fun open(): Boolean {
         val min = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (min <= 0) return false
+        val voice = ears()
         val t = runCatching {
             AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
-                        // 音量流跟 usage 走，不跟设备走。
-                        // 免提：媒体。和放音乐同一条道，音量大、蓝牙走高清，音量键调的是音乐。
-                        // 听筒：通话。系统把它当通话音频，音量键调的就是通话音量，
-                        //       和系统电话一个语义（之前一律用媒体，调听筒音量时实际在调音乐音量）。
-                        // 通信模式与输出设备由 SpeechPlugin 的 setMode/setCommunicationDevice 管。
+                        // 听筒用通话标签（路由与音量键指向都对）；但实测（Pixel 4 / Android 13）
+                        // 这条轨仍被混进 primary output，增益还是按媒体流算——通话音量 7 与 1 的
+                        // 输出功率都是 -33.0 dB。legacy setStreamType 在 API 34 已移除，绕不过去。
                         .setUsage(
-                            if (ears()) AudioAttributes.USAGE_VOICE_COMMUNICATION
+                            if (voice) AudioAttributes.USAGE_VOICE_COMMUNICATION
                             else AudioAttributes.USAGE_MEDIA,
                         )
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
