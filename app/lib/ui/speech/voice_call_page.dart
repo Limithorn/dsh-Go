@@ -160,6 +160,7 @@ class CallOrb extends StatelessWidget {
     required this.palette,
     required this.dark,
     required this.size,
+    this.halo = 1,
   });
 
   final CallScene scene;
@@ -169,10 +170,13 @@ class CallOrb extends StatelessWidget {
   final bool dark;
   final double size;
 
+  /// Softened for the small window; the page keeps 1.
+  final double halo;
+
   @override
   Widget build(BuildContext context) {
     if (visual == CallVisual.glass) {
-      return CallLight(key: const ValueKey('glass'), scene: scene, palette: palette, size: size);
+      return CallLight(key: const ValueKey('glass'), scene: scene, palette: palette, size: size, halo: halo);
     }
     final phase = call.phase;
     return VoiceRing(
@@ -269,49 +273,56 @@ class _CallPipViewState extends State<CallPipView> {
     final palette = CallPalette.of(widget.theme.colorScheme, light: !dark);
     final (status, _) = callStatus(widget.l10n, widget.call, signedIn: () => widget.signedIn);
     final fg = dark ? Colors.white : const Color(0xFF14161F);
-    return ColoredBox(
-      color: palette.field,
-      child: CallClock(
-        onTick: _tick,
-        child: SafeArea(
-          minimum: const EdgeInsets.all(6),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final size = math.min(constraints.maxWidth, constraints.maxHeight) * 0.8;
-              return Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Expanded(
-                    child: Center(
-                      child: FittedBox(
-                        child: CallOrb(
-                          key: const ValueKey('call-pip-orb'),
-                          scene: _scene,
-                          call: widget.call,
-                          visual: widget.visual,
-                          palette: palette,
-                          dark: dark,
-                          size: size,
+    return CallClock(
+      onTick: _tick,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // The page's field, so the small window is not a flat swatch of
+          // colour: the same faint light sits behind the sphere, a little
+          // stronger, since a window this small shows it less.
+          CallField(scene: _scene, palette: palette, strength: 1.7),
+          SafeArea(
+            minimum: const EdgeInsets.all(6),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final size = math.min(constraints.maxWidth, constraints.maxHeight) * 0.8;
+                return Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Center(
+                        child: FittedBox(
+                          child: CallOrb(
+                            key: const ValueKey('call-pip-orb'),
+                            scene: _scene,
+                            call: widget.call,
+                            visual: widget.visual,
+                            palette: palette,
+                            dark: dark,
+                            size: size,
+                            halo: 0.35,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Text(
-                      status,
-                      maxLines: 2,
-                      textAlign: TextAlign.center,
-                      overflow: TextOverflow.ellipsis,
-                      style: widget.theme.textTheme.labelMedium?.copyWith(color: fg),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Text(
+                        status,
+                        maxLines: 2,
+                        textAlign: TextAlign.center,
+                        overflow: TextOverflow.ellipsis,
+                        style: widget.theme.textTheme.labelMedium?.copyWith(color: fg),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                ],
-              );
-            },
+                    const SizedBox(height: 4),
+                  ],
+                );
+              },
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -354,7 +365,15 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     duration: const Duration(milliseconds: 1100),
   );
   Timer? _leave;
-  DateTime? _since;
+
+  /// The clock counts from when the call began listening, which the call
+  /// itself keeps: 收起 pops this page, and 展开 pushes a new one that must
+  /// carry on from the same moment rather than start at --:--.
+  DateTime? get _since => _call.startedAt;
+
+  /// The first 在听 of this call has already been taken: its touch and its
+  /// one count per call happen once, even if the page is pushed again.
+  bool _rang = false;
   CallPhase _shown = CallPhase.starting;
 
   // Her, when she is the backdrop.
@@ -448,6 +467,7 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
       if (_call.phase == CallPhase.ended) _scheduleLeave();
     }
     _shown = _call.phase;
+    _rang = _call.startedAt != null;
     HapticFeedback.mediumImpact();
     _enter.forward();
     unawaited(_start(start: _mine));
@@ -540,8 +560,8 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   /// A new phase: a touch under the finger, and her mood when she is there.
   void _arrived(CallPhase phase) {
     switch (phase) {
-      case CallPhase.listening when _since == null:
-        _since = DateTime.now();
+      case CallPhase.listening when !_rang:
+        _rang = true;
         HapticFeedback.lightImpact();
         // Anonymous usage statistics: a call got through (the microphone is on).
         ref.read(usageStatsProvider.notifier).count(UsageCount.call);
