@@ -48,7 +48,11 @@
     <!-- flutter_webrtc's AudioSwitch asks for these; DSH Remote is data only and must not
          manage system audio routing. Its native audio module uses media attributes (webrtc_peer.dart). -->
     <uses-permission android:name="android.permission.BLUETOOTH" tools:node="remove" />
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" tools:node="remove" />
+    <!-- 语音通话的听筒与免提要走系统通话路由：startCall 里 setMode(MODE_IN_COMMUNICATION)
+         加 setCommunicationDevice()，endCall 再复位。没有这条权限 setMode 会被静默拒绝
+         （dumpsys audio 里 Actual mode 停在 NORMAL），setCommunicationDevice 跟着无效，
+         免提键按下去声音仍在扬声器。蓝牙那条 remove 不动，AudioSwitch 仍不参与。 -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <!-- The rootfs contains plaintext credentials; exclude it from Android backup.
          TODO(targetSdk >= 31): also configure dataExtractionRules. -->
