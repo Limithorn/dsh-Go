@@ -20,6 +20,7 @@
 // 交给它，卡片和页面各拿各的。
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -101,6 +102,9 @@ class VoiceCallHost extends ChangeNotifier {
     _muted = made.muted;
     made.addListener(_onCall);
     container.read(callSurfaceProvider.notifier).set(CallSurface.full);
+    // The channel is watched for the whole call, not for a page: 收起 pops
+    // the page, and the card still has to hear pictureInPictureChanged.
+    watchPictureInPicture();
     // 设置的改动全程都听：收起时页面没了，这些监听也得活着。
     _subs = [
       container.listen(speechVoiceSettingsProvider, (_, _) => unawaited(book.settle())),
@@ -188,6 +192,7 @@ class VoiceCallHost extends ChangeNotifier {
     _collapsed = false;
     _pageUp = false;
     call.removeListener(_onCall);
+    stopWatchingPictureInPicture();
     unawaited(setCallActive(false));
     unawaited(setCallScreen(false));
     call.dispose();
@@ -209,6 +214,7 @@ class VoiceCallHost extends ChangeNotifier {
     _closeTimer = null;
     _book?.close();
     _book = null;
+    stopWatchingPictureInPicture();
     for (final sub in _subs) {
       sub.close();
     }
@@ -338,6 +344,10 @@ class CallCardLayer extends StatefulWidget {
 class _CallCardLayerState extends State<CallCardLayer> {
   VoiceCallHost get _host => VoiceCallHost.instance;
 
+  /// Where the card was dragged. A ValueNotifier, so a pan rebuilds only the
+  /// transform and the gesture recognizer is never thrown away mid-drag.
+  final _cardOffset = ValueNotifier<Offset>(Offset.zero);
+
   @override
   void initState() {
     super.initState();
@@ -347,11 +357,24 @@ class _CallCardLayerState extends State<CallCardLayer> {
   @override
   void dispose() {
     _host.removeListener(_onHost);
+    _cardOffset.dispose();
     super.dispose();
+  }
+
+  Offset _clamp(Offset offset, Size size) {
+    final side = math.max(0.0, size.width / 2 - 40);
+    final up = math.max(0.0, size.height - 96);
+    return Offset(
+      offset.dx.clamp(-side, side).toDouble(),
+      // It starts 20 above the bottom: keep it on the screen, let it travel
+      // all the way up.
+      offset.dy.clamp(-up, 20.0).toDouble(),
+    );
   }
 
   void _onHost() {
     if (!mounted) return;
+    if (_host.call == null) _cardOffset.value = Offset.zero;
     // The call, its shape, or its status changed: redraw (what shows — the
     // card, its status, her small window — is decided in build).
     setState(() {});
@@ -369,47 +392,87 @@ class _CallCardLayerState extends State<CallCardLayer> {
     }
   }
 
+  /// 收起状态按返回：进画中画，而不是让系统把 App 裸送进后台（麦克风会
+  /// 被掐、回来后每一句都发不出去）。小窗用不了就退回通话页。
+  Future<void> _leaveToPip(BuildContext context) async {
+    final entered = await enterPictureInPicture();
+    if (entered || !context.mounted) return;
+    if (_host.collapsed && !_host.pageUp) await _host.expand(context);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final call = _host.call;
-    // Nothing hosted: straight through, untouched (the pages beneath must not
-    // pay for a card that is not there).
-    if (call == null) return widget.child;
-    final host = _host;
-    final l10n = context.l10n;
-    final theme = Theme.of(context);
-    // 收起状态下进了画中画：小窗里照样是她（页面不在了，这层替它画），
-    // 而不是挤扁的聊天页。
-    if (pictureInPictureMode.value && host.collapsed) {
-      return callPipView(l10n: l10n, theme: theme, call: call);
-    }
-    if (!host.collapsed) return widget.child;
-    final container = ProviderScope.containerOf(context, listen: false);
-    final card = CollapsedCallCard(
-      status: callStatus(l10n, call, signedIn: () => container.read(accountProvider).signedIn).$1,
-      ended: call.phase == CallPhase.ended,
-      l10n: l10n,
-      theme: theme,
-      onExpand: () => unawaited(_host.expand(context)),
-      onPip: enterPictureInPicture,
-      onHangUp: () {
-        HapticFeedback.heavyImpact();
-        call.hangUp();
+    return ValueListenableBuilder<bool>(
+      valueListenable: pictureInPictureMode,
+      builder: (context, pip, _) {
+        final call = _host.call;
+        final collapsed = _host.collapsed && !_host.pageUp;
+        final small = pip && collapsed && call != null;
+        // 恒定结构：PopScope → Stack → [页面, 覆盖层]。状态切换只改属性，
+        // 下面的页面树永远不卸载。发起通话的聊天页持有会话绑定，拆了它，
+        // 回来后每一句都「没发出去，再说一次」。
+        return PopScope(
+          // 收起状态按返回不退出 App：交给画中画，通话继续。
+          canPop: !collapsed,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) unawaited(_leaveToPip(context));
+          },
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Offstage(offstage: small, child: widget.child),
+              if (small)
+                Positioned.fill(child: callPipView(l10n: context.l10n, theme: Theme.of(context), call: call))
+              else if (collapsed && call != null)
+                ValueListenableBuilder<Offset>(
+                  valueListenable: _cardOffset,
+                  // 布局位置真的跟着拖，命中区域也跟着走。用 Transform 只挪
+                  // 绘制、不挪布局盒子，卡片拖走后按钮就点不到了。
+                  builder: (_, offset, child) => Positioned(
+                    left: 16 + offset.dx,
+                    right: 16 - offset.dx,
+                    bottom: 20 - offset.dy,
+                    child: child!,
+                  ),
+                  child: RepaintBoundary(
+                    child: Align(alignment: Alignment.center, child: _card(context, call)),
+                  ),
+                )
+              else
+                const SizedBox.shrink(),
+            ],
+          ),
+        );
       },
     );
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        widget.child,
-        // The card takes touches; everything around it goes through to the
-        // pages beneath (collapsed_card_hit_test.dart's lesson, applied).
-        Positioned(
-          left: 16,
-          right: 16,
-          bottom: 20,
-          child: RepaintBoundary(child: Align(alignment: Alignment.center, child: card)),
-        ),
-      ],
+  }
+
+  /// The card and its drag. The pan drives a ValueNotifier that only rebuilds
+  /// the transform: the buttons and the recognizer under it are cached, so a
+  /// drag never dies halfway (the old "拖一下就卡住" was the recognizer being
+  /// rebuilt with the whole tree).
+  Widget _card(BuildContext context, VoiceCallController call) {
+    final container = ProviderScope.containerOf(context, listen: false);
+    final size = MediaQuery.sizeOf(context);
+    return GestureDetector(
+      // Pan and the buttons' taps compete in the same arena: a tap wins a
+      // press, a drag wins a move. Cached by the notifier above, so the
+      // recognizer is never rebuilt under an active drag.
+      onPanUpdate: (details) => _cardOffset.value = _clamp(_cardOffset.value + details.delta, size),
+      child: CollapsedCallCard(
+        status: callStatus(context.l10n, call, signedIn: () => container.read(accountProvider).signedIn).$1,
+        ended: call.phase == CallPhase.ended,
+        l10n: context.l10n,
+        theme: Theme.of(context),
+        muted: call.muted,
+        onMute: () => call.setMuted(!call.muted),
+        onExpand: () => unawaited(_host.expand(context)),
+        onPip: enterPictureInPicture,
+        onHangUp: () {
+          HapticFeedback.heavyImpact();
+          call.hangUp();
+        },
+      ),
     );
   }
 }

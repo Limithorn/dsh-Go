@@ -20,7 +20,6 @@ import '../../companion/companion_voice.dart';
 import '../../companion/companion_voice_source.dart';
 import '../../l10n/l10n.dart';
 import '../../performance/performance_state.dart';
-import '../../state/android_features.dart' show operatingSystemProvider;
 import '../../speech/call/chat_call.dart';
 import '../../speech/call/thinking_cue.dart';
 import '../../speech/call/voice_call.dart';
@@ -31,6 +30,7 @@ import '../../speech/speech_out.dart';
 import '../../speech/speech_settings.dart';
 import '../../speech/voice_cloud.dart';
 import '../../state/account_state.dart';
+import '../../state/android_features.dart' show operatingSystemProvider;
 import '../../state/app_notes.dart';
 import '../../state/picture_in_picture.dart';
 import '../../state/voice_call_host.dart';
@@ -258,13 +258,15 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   @override
   void initState() {
     super.initState();
+    _mine = widget.controller == null;
     WidgetsBinding.instance.addObserver(this);
     // 通话期间告诉原生：按 home 不要退到后台，直接缩成小窗，麦克风才不被挖。
     unawaited(setCallActive(true));
     unawaited(setCallScreen(true));
-    watchPictureInPicture();
+    // A hosted call keeps the channel watched by its host: 收起 pops this
+    // page, and its dispose must not take the picture-in-picture events away.
+    if (_mine) watchPictureInPicture();
     pictureInPictureMode.addListener(_onPipChanged);
-    _mine = widget.controller == null;
     if (_mine) {
       final callSettings = ref.read(callSettingsProvider.notifier);
       final voices = ref.read(speechVoiceSettingsProvider.notifier);
@@ -491,6 +493,8 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
                   ended: _call.phase == CallPhase.ended,
                   l10n: l10n,
                   theme: theme,
+                  muted: _call.muted,
+                  onMute: () => _call.setMuted(!_call.muted),
                   onExpand: () => setState(() => _collapsed = false),
                   onPip: _enterPip,
                   onHangUp: _hangUp,
@@ -538,7 +542,7 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     pictureInPictureMode.removeListener(_onPipChanged);
-    stopWatchingPictureInPicture();
+    if (_mine) stopWatchingPictureInPicture();
     unawaited(_live?.stop());
     _leave?.cancel();
     _enter.dispose();
@@ -662,6 +666,19 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
 
   @override
   Widget build(BuildContext context) {
+    return PopScope(
+      // 整页按返回：收起成卡片，通话继续。之前返回键直接 pop 掉这条路由，
+      // 宿主的 collapsed 没置位 → 卡片不显示，看着就是「语音界面直接退出」。
+      // 挂断之后 canPop 放开，_scheduleLeave 才能自己把页面收掉。
+      canPop: _call.phase == CallPhase.ended,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && !_collapsed && _call.phase != CallPhase.ended) _collapse();
+      },
+      child: _body(context),
+    );
+  }
+
+  Widget _body(BuildContext context) {
     final l10n = context.l10n;
     final theme = Theme.of(context);
     // 画中画只有巴掌大，塞整页会把球、字幕、一排按钮挤成一团；
@@ -921,6 +938,8 @@ class CollapsedCallCard extends StatelessWidget {
     required this.onExpand,
     required this.onPip,
     required this.onHangUp,
+    this.muted = false,
+    this.onMute,
   });
 
   final String status;
@@ -930,6 +949,8 @@ class CollapsedCallCard extends StatelessWidget {
   final VoidCallback onExpand;
   final Future<void> Function() onPip;
   final VoidCallback onHangUp;
+  final bool muted;
+  final VoidCallback? onMute;
 
   @override
   Widget build(BuildContext context) {
@@ -944,8 +965,18 @@ class CollapsedCallCard extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(AppIcons.voice, size: 18, color: ink.primary),
-            const SizedBox(width: 10),
+            // 不是装饰：它和整页那个键一样，是静音/取消静音。
+            IconButton(
+              key: const ValueKey('call-collapsed-mute'),
+              tooltip: muted ? l10n.speechCallUnmute : l10n.speechCallMute,
+              icon: Icon(
+                muted ? AppIcons.micMuted : AppIcons.voice,
+                size: 18,
+                color: muted ? ink.error : ink.primary,
+              ),
+              onPressed: ended || onMute == null ? null : onMute,
+            ),
+            const SizedBox(width: 4),
             SizedBox(
               width: 132,
               child: Text(
