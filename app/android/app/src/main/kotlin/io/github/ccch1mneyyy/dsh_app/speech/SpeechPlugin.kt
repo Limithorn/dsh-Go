@@ -56,11 +56,13 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
     private var activity: ActivityPluginBinding? = null
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        live = this
         context = binding.applicationContext
         methods = MethodChannel(binding.binaryMessenger, CHANNEL).also { it.setMethodCallHandler(this) }
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        if (live === this) live = null
         methods.setMethodCallHandler(null)
         stream?.stop()
         stream = null
@@ -168,7 +170,10 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
         if (!s.open()) return false
         // 开流时就按当前的免提状态把输出设备定下来：免提键往往在她不说话时按，
         // 那时 stream 还是 null，只靠 callSpeaker 里的那一次会落空。
-        if (forCall) s.setSpeaker(speaker)
+        if (forCall) {
+            s.setSpeaker(speaker)
+            s.setGain(callGain)
+        }
         stream = s
         if (!forCall && !requestFocus()) {
             s.stop()
@@ -227,6 +232,18 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
     }
 
     // ── Calls ─────────────────────────────────────────────────────────────
+
+    /** 通话里由音量键控制的增益（0..1）；与系统音量无关，切换听筒/免提也保持。 */
+    @Volatile private var callGain = 1f
+
+    /** 音量键按一下：增益走一档，改当前流，并告诉 Dart（界面给个反馈）。 */
+    fun nudgeGain(up: Boolean): Float {
+        val step = 1f / 15f
+        callGain = (callGain + if (up) step else -step).coerceIn(0f, 1f)
+        stream?.setGain(callGain)
+        send("callVolume", "value" to callGain)
+        return callGain
+    }
 
     private fun startCall(bargeIn: Boolean, pause: TurnPause): String {
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -328,6 +345,10 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
     }
 
     companion object {
+        /** 挂着的实例：MainActivity 拦截音量键时找它（插件由引擎持有，Activity 拿不到引用）。 */
+        @Volatile var live: SpeechPlugin? = null
+            private set
+
         private const val CHANNEL = "dsh/speech"
         private val HEADSETS = setOf(
             AudioDeviceInfo.TYPE_WIRED_HEADSET,
