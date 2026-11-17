@@ -341,12 +341,20 @@ class CallCardLayer extends StatefulWidget {
   State<CallCardLayer> createState() => _CallCardLayerState();
 }
 
-class _CallCardLayerState extends State<CallCardLayer> {
+class _CallCardLayerState extends State<CallCardLayer> with SingleTickerProviderStateMixin {
   VoiceCallHost get _host => VoiceCallHost.instance;
 
   /// Where the card was dragged. A ValueNotifier, so a pan rebuilds only the
   /// transform and the gesture recognizer is never thrown away mid-drag.
   final _cardOffset = ValueNotifier<Offset>(Offset.zero);
+
+  /// 松手时把超出屏幕的部分滑回来。没有它，横着多拖几次卡片就停在
+  /// 屏幕外，四个键和拖拽起点一起消失（真机上看着就是「卡死」）。
+  late final AnimationController _snap = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 180),
+  );
+  VoidCallback? _snapTick;
 
   @override
   void initState() {
@@ -356,25 +364,76 @@ class _CallCardLayerState extends State<CallCardLayer> {
 
   @override
   void dispose() {
+    _stopSnap();
+    _snap.dispose();
     _host.removeListener(_onHost);
     _cardOffset.dispose();
     super.dispose();
   }
 
-  Offset _clamp(Offset offset, Size size) {
-    final side = math.max(0.0, size.width / 2 - 40);
+  /// Positioned 同时给 left/right：卡片的宽度恒为屏幕宽减去 2×[_cardInset]。
+  /// 它不是能到处跑的小浮窗，是一条横贯屏幕的横幅。
+  static const double _cardInset = 16;
+  static const double _screenMargin = 8;
+  static const double _dragGive = 24;
+
+  /// 松手后必须停住的范围。left = inset + dx、right = inset - dx，
+  /// 两边都要留 [_screenMargin]，所以 dx 只剩 ±(inset - margin)。
+  /// 真正能大幅挪动的是上下（让开输入框和正文），不是左右。
+  Offset _clampRest(Offset offset, Size size) {
+    final side = math.max(0.0, _cardInset - _screenMargin);
     final up = math.max(0.0, size.height - 96);
     return Offset(
       offset.dx.clamp(-side, side).toDouble(),
-      // It starts 20 above the bottom: keep it on the screen, let it travel
-      // all the way up.
       offset.dy.clamp(-up, 20.0).toDouble(),
     );
   }
 
+  /// 按住时多给一点弹性，手上有跟手的反馈；但只多 [_dragGive]，
+  /// 不再按「屏幕宽/2 - 40」放行 —— 那个半径会把整条卡片推出屏幕。
+  Offset _clampDrag(Offset offset, Size size) {
+    final rest = _clampRest(offset, size);
+    final side = math.max(0.0, _cardInset - _screenMargin) + _dragGive;
+    return Offset(offset.dx.clamp(-side, side).toDouble(), rest.dy);
+  }
+
+  void _stopSnap() {
+    _snap.stop();
+    final tick = _snapTick;
+    if (tick != null) {
+      _snap.removeListener(tick);
+      _snapTick = null;
+    }
+  }
+
+  /// 松手：卡片永远完整留在屏内，静音/展开/小窗/挂断四个键都点得到。
+  void _settle(Size size) {
+    final from = _cardOffset.value;
+    final to = _clampRest(from, size);
+    if (from == to) return;
+    _stopSnap();
+    final anim = Tween<Offset>(begin: from, end: to)
+        .animate(CurvedAnimation(parent: _snap, curve: Curves.easeOut));
+    void tick() {
+      if (mounted) _cardOffset.value = anim.value;
+    }
+
+    _snapTick = tick;
+    _snap.addListener(tick);
+    _snap.forward(from: 0).whenCompleteOrCancel(() {
+      if (_snapTick == tick) {
+        _snap.removeListener(tick);
+        _snapTick = null;
+      }
+    });
+  }
+
   void _onHost() {
     if (!mounted) return;
-    if (_host.call == null) _cardOffset.value = Offset.zero;
+    if (_host.call == null) {
+      _stopSnap();
+      _cardOffset.value = Offset.zero;
+    }
     // The call, its shape, or its status changed: redraw (what shows — the
     // card, its status, her small window — is decided in build).
     setState(() {});
@@ -429,8 +488,8 @@ class _CallCardLayerState extends State<CallCardLayer> {
                   // 布局位置真的跟着拖，命中区域也跟着走。用 Transform 只挪
                   // 绘制、不挪布局盒子，卡片拖走后按钮就点不到了。
                   builder: (_, offset, child) => Positioned(
-                    left: 16 + offset.dx,
-                    right: 16 - offset.dx,
+                    left: _cardInset + offset.dx,
+                    right: _cardInset - offset.dx,
                     bottom: 20 - offset.dy,
                     child: child!,
                   ),
@@ -450,7 +509,8 @@ class _CallCardLayerState extends State<CallCardLayer> {
   /// The card and its drag. The pan drives a ValueNotifier that only rebuilds
   /// the transform: the buttons and the recognizer under it are cached, so a
   /// drag never dies halfway (the old "拖一下就卡住" was the recognizer being
-  /// rebuilt with the whole tree).
+  /// rebuilt with the whole tree). 松手时 [_settle] 把卡片收回屏内：
+  /// 让它停在屏幕外，下一根手指就既拖不到也点不到按钮。
   Widget _card(BuildContext context, VoiceCallController call) {
     final container = ProviderScope.containerOf(context, listen: false);
     final size = MediaQuery.sizeOf(context);
@@ -458,7 +518,11 @@ class _CallCardLayerState extends State<CallCardLayer> {
       // Pan and the buttons' taps compete in the same arena: a tap wins a
       // press, a drag wins a move. Cached by the notifier above, so the
       // recognizer is never rebuilt under an active drag.
-      onPanUpdate: (details) => _cardOffset.value = _clamp(_cardOffset.value + details.delta, size),
+      onPanStart: (_) => _stopSnap(),
+      onPanUpdate: (details) =>
+          _cardOffset.value = _clampDrag(_cardOffset.value + details.delta, size),
+      onPanEnd: (_) => _settle(size),
+      onPanCancel: () => _settle(size),
       child: CollapsedCallCard(
         status: callStatus(context.l10n, call, signedIn: () => container.read(accountProvider).signedIn).$1,
         ended: call.phase == CallPhase.ended,
