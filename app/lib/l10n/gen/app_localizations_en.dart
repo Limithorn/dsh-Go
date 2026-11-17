@@ -20166,7 +20166,9 @@ class L10nEn extends L10n {
   String get wakeToggle => 'Wake it by name';
 
   @override
-  String get wakeToggleHint => 'Say 你好米 to start a call';
+  String wakeToggleHint(String word) {
+    return 'Say \"$word\" to start a call';
+  }
 
   @override
   String get wakeToggleOn => 'Listening for your name';

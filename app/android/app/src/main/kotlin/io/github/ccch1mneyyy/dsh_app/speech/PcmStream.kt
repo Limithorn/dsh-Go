@@ -82,18 +82,6 @@ class PcmStream(
         runCatching { t.preferredDevice = target }
     }
 
-    /**
-     * 声音要从内置听筒出来：通话中、免提关着，且当前通信设备就是听筒。
-     * 有耳机/蓝牙在场时仍走媒体（蓝牙能走高清），不因为切听筒把它拉到 SCO。
-     */
-    private fun ears(): Boolean {
-        if (!call || speakerOn) return false
-        val am = context?.getSystemService(AudioManager::class.java) ?: return true
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
-        val device = runCatching { am.communicationDevice }.getOrNull()
-        return device == null || device.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
-    }
-
     fun open(): Boolean {
         val min = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (min <= 0) return false
@@ -101,15 +89,11 @@ class PcmStream(
             AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
-                        // 音量流跟 usage 走，不跟设备走。
-                        // 免提：媒体。和放音乐同一条道，音量大、蓝牙走高清，音量键调的是音乐。
-                        // 听筒：通话。系统把它当通话音频，音量键调的就是通话音量，
-                        //       和系统电话一个语义（之前一律用媒体，调听筒音量时实际在调音乐音量）。
-                        // 通信模式与输出设备由 SpeechPlugin 的 setMode/setCommunicationDevice 管。
-                        .setUsage(
-                            if (ears()) AudioAttributes.USAGE_VOICE_COMMUNICATION
-                            else AudioAttributes.USAGE_MEDIA,
-                        )
+                        // 一律媒体用法：增益按 STREAM_MUSIC 曲线算（Pixel 4 实测通话
+                        // 音量 7 与 1 的输出功率都是 -33 dB，usage 不决定增益）。
+                        // 听筒/免提的区别只在输出设备 preferredDevice（setSpeaker），
+                        // 音量键全程归媒体流，两种出路都能真正调大声小声。
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build(),
                 )

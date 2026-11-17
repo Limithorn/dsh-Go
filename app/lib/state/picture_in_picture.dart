@@ -87,3 +87,18 @@ Future<void> setCallScreen(bool active) async {
     // 同上。
   }
 }
+
+/// 整页通话收起（返回键/收起键）时告诉原生：若此刻正锁屏，撤掉 showWhenLocked，
+/// 让 keyguard 立刻盖住界面——一次返回就回到锁屏，而不是先露出底下的对话页。
+///
+/// 是否真的撤由原生判断（showWhenLocked 时 Dart 收不到锁屏生命周期，判不准）。
+/// 没锁屏时原生什么都不做，正常收起成卡片继续聊。
+Future<void> leaveCallToLock() async {
+  try {
+    await _channel.invokeMethod<void>('leaveCallToLock');
+  } on PlatformException {
+    // 没有原生侧（桌面、测试）：不拦。
+  } on MissingPluginException {
+    // 同上。
+  }
+}

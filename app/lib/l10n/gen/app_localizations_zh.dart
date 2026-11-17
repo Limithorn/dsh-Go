@@ -19097,7 +19097,9 @@ class L10nZh extends L10n {
   String get wakeToggle => '叫它就醒来';
 
   @override
-  String get wakeToggleHint => '说「你好米」直接开始通话';
+  String wakeToggleHint(String word) {
+    return '说「$word」直接开始通话';
+  }
 
   @override
   String get wakeToggleOn => '在听你叫它';

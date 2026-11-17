@@ -9,8 +9,6 @@
 //
 //   flutter test test/speech/collapsed_call_flow_test.dart
 
-import 'dart:typed_data';
-
 import 'package:dsh_app/speech/deepseek_speech.dart';
 import 'package:dsh_app/speech/speech_audio.dart';
 import 'package:dsh_app/speech/call/voice_call.dart';
@@ -19,6 +17,7 @@ import 'package:dsh_app/state/voice_call_host.dart';
 import 'package:dsh_app/state/voice_state.dart';
 import 'package:dsh_app/ui/speech/voice_call_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -186,6 +185,25 @@ void main() {
     }
     expect(find.text('在听'), findsOneWidget);
     expect(audio.calls, isNot(contains('callStop')), reason: '整轮走完，通话没断过');
+  });
+
+  testWidgets('收起整页通话时请求原生退出锁屏展示：亮屏返回直接回锁屏，不再先露对话页', (tester) async {
+    // 用户报的：整页通话锁屏→亮屏→返回→对话页→再返回→锁屏。期望一次返回就到锁屏。
+    // showWhenLocked 时 Dart 收不到锁屏生命周期，判断放原生；Dart 这边只负责在整页
+    // 收起时调一次 leaveCallToLock（原生内部再判 isKeyguardLocked 决定是否撤 flag）。
+    final messenger = tester.binding.defaultBinaryMessenger;
+    final methods = <String>[];
+    messenger.setMockMethodCallHandler(const MethodChannel('dsh/app'), (call) async {
+      methods.add(call.method);
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(const MethodChannel('dsh/app'), null));
+
+    await pumpHosted(tester);
+    await collapse(tester);
+
+    expect(methods, contains('leaveCallToLock'),
+        reason: '整页收起必须让原生有机会撤掉 showWhenLocked，锁屏才能直接盖上来');
   });
 
   testWidgets('收起时出了岔子：页面弹回来让人读到原因，然后收拾干净', (tester) async {

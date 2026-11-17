@@ -35123,8 +35123,8 @@ abstract class L10n {
   /// No description provided for @wakeToggleHint.
   ///
   /// In zh, this message translates to:
-  /// **'说「你好米」直接开始通话'**
-  String get wakeToggleHint;
+  /// **'说「{word}」直接开始通话'**
+  String wakeToggleHint(String word);
 
   /// No description provided for @wakeToggleOn.
   ///

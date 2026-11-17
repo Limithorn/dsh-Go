@@ -345,6 +345,36 @@ class MainActivity : FlutterActivity() {
                     }
                     result.success(null)
                 }
+                // 整页通话被收起（返回键/收起键）时调一次。锁屏亮屏时通话页靠
+                // showWhenLocked 浮在 keyguard 之上，按返回只是把它收成卡片，底下的
+                // 对话页仍顶着锁屏显示，要按第二次才回到锁屏。这里在收起之际撤掉
+                // 那两个 flag，keyguard 立刻盖上来：一次返回就回锁屏，解锁后是对话页。
+                //
+                // 是否锁屏由原生判断——showWhenLocked 时 Activity 处于 resumed，
+                // Dart 侧收不到 onPause 的"锁屏"通知，判不准。没锁屏则什么都不做，
+                // 免得破坏正常收起后的卡片态和唤醒词锁屏叫醒。
+                "leaveCallToLock" -> {
+                    val locked = runCatching {
+                        getSystemService(android.app.KeyguardManager::class.java)?.isKeyguardLocked == true
+                    }.getOrDefault(false)
+                    if (locked) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                            runCatching {
+                                setShowWhenLocked(false)
+                                setTurnScreenOn(false)
+                            }
+                        } else {
+                            @Suppress("DEPRECATION")
+                            runCatching {
+                                window.clearFlags(
+                                    android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                        android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
+                                )
+                            }
+                        }
+                    }
+                    result.success(locked)
+                }
                 "setCallActive" -> {
                     callActive = call.argument<Boolean>("active") ?: false
                     // 通话中让音量键去调媒体流（官方文档 Controlling Your App's Volume and Playback 的做法）。

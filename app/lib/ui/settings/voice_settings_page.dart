@@ -259,7 +259,7 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
                 'mic_busy' || 'mic_unavailable' => l10n.wakeProblemMicBusy,
                 'model_unavailable' => l10n.wakeProblemModel,
                 'service_refused' => l10n.wakeProblemService,
-                _ => wake.enabled ? l10n.wakeToggleOn : l10n.wakeToggleHint,
+                _ => wake.enabled ? l10n.wakeToggleOn : l10n.wakeToggleHint(word),
               },
               trailing: wake.loading
                   ? const SizedBox.square(
