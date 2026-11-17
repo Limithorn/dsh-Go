@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.os.PowerManager
 import android.util.Rational
 import android.content.res.Configuration
@@ -368,6 +369,11 @@ class MainActivity : FlutterActivity() {
                 }
                 "setCallActive" -> {
                     callActive = call.argument<Boolean>("active") ?: false
+                    // 通话中让音量键去调媒体流（官方文档 Controlling Your App's Volume and Playback 的做法）。
+                    // 理由：这条音轨的增益本来就按媒体流算（Pixel 上通话音量 7 与 1 的输出功率都是 -33.0 dB），
+                    // 键指到通话音量反而调不动。挂断就还原，界面里别的按键不受影响。
+                    volumeControlStream =
+                        if (callActive) AudioManager.STREAM_MUSIC else AudioManager.USE_DEFAULT_STREAM_TYPE
                     // Android 12 起该用 autoEnter：事先告诉系统「我在通话」，
                     // 人一按 home 它自己就缩成小窗。onUserLeaveHint 里再调一次
                     // 在 12+ 上容易被当成「Activity 已经走了」而失败，
