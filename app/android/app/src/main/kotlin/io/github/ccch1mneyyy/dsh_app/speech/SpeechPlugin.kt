@@ -104,11 +104,13 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
     private var activity: ActivityPluginBinding? = null
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        live = this
         context = binding.applicationContext
         methods = MethodChannel(binding.binaryMessenger, CHANNEL).also { it.setMethodCallHandler(this) }
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        if (live === this) live = null
         methods.setMethodCallHandler(null)
         stream?.stop()
         stream = null
