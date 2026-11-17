@@ -12,6 +12,7 @@ import 'package:dsh_app/speech/voice_cloud.dart';
 import 'package:dsh_app/state/picture_in_picture.dart';
 import 'package:dsh_app/state/voice_call_host.dart';
 import 'package:dsh_app/state/voice_state.dart';
+import 'package:dsh_app/ui/speech/call/call_visuals.dart';
 import 'package:dsh_app/ui/speech/voice_call_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -305,6 +306,115 @@ void main() {
     }
     expect(find.byType(VoiceCallPage), findsOneWidget);
     expect(VoiceCallHost.instance.call!.phase, isNot(CallPhase.ended));
+  });
+
+  Future<void> pumpIdle(WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1170, 2532);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      testApp(
+        CallCardLayer(child: Scaffold(body: Center(child: Text('聊天页')))),
+        overrides: callOverrides(FakeAudio(), '你好'),
+      ),
+    );
+    for (var i = 0; i < 4; i++) {
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+  }
+
+  // ---- 第四轮：窄卡片 / 没通话不进小窗 / 小窗动态光球 ----
+
+  testWidgets('收起卡片是窄的，左右能挪开，四个键始终在屏内', (tester) async {
+    await pumpHosted(tester);
+    await collapse(tester);
+    final card = find.byKey(const ValueKey('call-collapsed'));
+    final layer = tester.getRect(find.byType(CallCardLayer));
+    final before = tester.getRect(card);
+
+    expect(before.width, lessThan(layer.width * 0.72),
+        reason: '卡片得明显窄于屏幕，不能还是横贯整屏的横条');
+
+    // 窄了以后左右才有余量：把它从中间拖到右边。
+    await tester.drag(card, const Offset(140, 0));
+    for (var i = 0; i < 8; i++) {
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+    final after = tester.getRect(card);
+    expect(after.left, greaterThan(before.left + 30), reason: '窄卡片左右该能挪开挡住的内容');
+    expect(after.left, greaterThanOrEqualTo(layer.left), reason: '卡片左边不能出屏');
+    expect(after.right, lessThanOrEqualTo(layer.right), reason: '卡片右边不能出屏');
+
+    for (final key in const <ValueKey<String>>[
+      ValueKey('call-collapsed-mute'),
+      ValueKey('call-expand'),
+      ValueKey('call-picture-in-picture'),
+      ValueKey('call-collapsed-hang-up'),
+    ]) {
+      final rect = tester.getRect(find.byKey(key));
+      expect(rect.left, greaterThanOrEqualTo(layer.left), reason: '$key 被推出屏幕左边');
+      expect(rect.right, lessThanOrEqualTo(layer.right), reason: '$key 被推出屏幕右边');
+    }
+  });
+
+  testWidgets('根本没开通话时：返回直接退后台，不进小窗，原生通话标志清零', (tester) async {
+    bool? active;
+    var pips = 0;
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(const MethodChannel('dsh/app'), (call) async {
+      if (call.method == 'setCallActive') active = (call.arguments as Map)['active'] as bool?;
+      if (call.method == 'enterPictureInPicture') {
+        pips++;
+        return true;
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(const MethodChannel('dsh/app'), null));
+
+    await pumpIdle(tester);
+    final scopes = find.descendant(
+      of: find.byType(CallCardLayer),
+      matching: find.byWidgetPredicate((w) => w is PopScope),
+    );
+    expect(scopes, findsWidgets);
+    final scope = tester.widget<PopScope>(scopes.first);
+    expect(scope.canPop, isTrue, reason: '没有通话，按返回该直接跑后台');
+    expect(active, isFalse, reason: '冷启动要把上次可能残留的原生通话标志清掉');
+
+    // 就算被误拦了，也不该把人送进小窗。
+    scope.onPopInvokedWithResult!(false, null);
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+    expect(pips, 0, reason: '没有通话就不该出现小窗');
+    expect(find.byKey(const ValueKey('call-collapsed')), findsNothing);
+  });
+
+  testWidgets('小窗里是通话界面那颗动态光球，不再是鲸鱼娘贴纸', (tester) async {
+    await pumpHosted(tester);
+    await collapse(tester);
+    pictureInPictureMode.value = true;
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+
+    final pip = find.byKey(const ValueKey('call-pip-view'));
+    expect(pip, findsOneWidget);
+    final orb = find.byKey(const ValueKey('call-pip-orb'));
+    expect(orb, findsOneWidget, reason: '小窗该放通话界面那颗光球');
+    expect(find.descendant(of: pip, matching: find.byType(Image)), findsNothing,
+        reason: '静态贴纸该撤掉');
+    expect(find.descendant(of: pip, matching: find.byType(CallClock)), findsOneWidget,
+        reason: '光球得有 ticker 一直驱动，不能是张静态图');
+    expect(find.descendant(of: pip, matching: find.byType(CustomPaint)), findsWidgets,
+        reason: '光球是画出来的，不是图片');
+
+    // 小窗里每帧都在推进光球：ticker 不能随小窗切换被停掉。
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+    expect(find.descendant(of: pip, matching: find.byType(CallClock)), findsOneWidget,
+        reason: '小窗里动画要一直活着');
   });
 
   test('会话只解析一次：发起页后来失效也不影响这通电话', () async {

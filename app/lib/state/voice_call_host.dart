@@ -166,6 +166,12 @@ class VoiceCallHost extends ChangeNotifier {
     if (call.phase == _phase && call.muted == _muted) return;
     _phase = call.phase;
     _muted = call.muted;
+    if (call.phase == CallPhase.ended) {
+      // 通话一结束就把原生标志关掉，不等页面收尾：页面可能因为异常没 pop，
+      // close() 那条 380ms 的路就走不到，标志会一直留着「还在通话」。
+      // 没通话时按返回/按 home 都不该再被自动缩成小窗。
+      unawaited(setCallActive(false));
+    }
     if (call.phase == CallPhase.ended && !_pageUp) {
       // Ended while shrunk: [CallCardLayer] pops the page back up so the
       // reason can be read; pageDown then closes everything out.
@@ -360,6 +366,10 @@ class _CallCardLayerState extends State<CallCardLayer> with SingleTickerProvider
   void initState() {
     super.initState();
     _host.addListener(_onHost);
+    // 冷启动 / RootGate 重建时若根本没有通话，把原生侧可能残留的
+    // callActive（以及 Android 12+ 的 autoEnter）关掉。否则在对话页按返回，
+    // popSystemNavigator、onUserLeaveHint、autoEnter 都会把人送进小窗。
+    if (_host.call == null) unawaited(setCallActive(false));
   }
 
   @override
@@ -371,17 +381,16 @@ class _CallCardLayerState extends State<CallCardLayer> with SingleTickerProvider
     super.dispose();
   }
 
-  /// Positioned 同时给 left/right：卡片的宽度恒为屏幕宽减去 2×[_cardInset]。
-  /// 它不是能到处跑的小浮窗，是一条横贯屏幕的横幅。
-  static const double _cardInset = 16;
+  /// 卡片现在是窄的一条（[CollapsedCallCard.width]），居中摆，左右都留出了
+  /// 余量：横向终于能真的挪动，而不是第三轮那样只剩 ±8dp 的跟手弹性。
+  /// 竖向范围不变，照样能一路拖到顶。
   static const double _screenMargin = 8;
   static const double _dragGive = 24;
 
-  /// 松手后必须停住的范围。left = inset + dx、right = inset - dx，
-  /// 两边都要留 [_screenMargin]，所以 dx 只剩 ±(inset - margin)。
-  /// 真正能大幅挪动的是上下（让开输入框和正文），不是左右。
+  /// 松手后必须停住的范围。left = 居中基准 + dx，两边都要留 [_screenMargin]。
   Offset _clampRest(Offset offset, Size size) {
-    final side = math.max(0.0, _cardInset - _screenMargin);
+    final base = (size.width - CollapsedCallCard.width) / 2;
+    final side = math.max(0.0, base - _screenMargin);
     final up = math.max(0.0, size.height - 96);
     return Offset(
       offset.dx.clamp(-side, side).toDouble(),
@@ -389,11 +398,11 @@ class _CallCardLayerState extends State<CallCardLayer> with SingleTickerProvider
     );
   }
 
-  /// 按住时多给一点弹性，手上有跟手的反馈；但只多 [_dragGive]，
-  /// 不再按「屏幕宽/2 - 40」放行 —— 那个半径会把整条卡片推出屏幕。
+  /// 按住时多给一点弹性，手上有跟手的反馈；松手由 [_settle] 收回安全范围。
   Offset _clampDrag(Offset offset, Size size) {
     final rest = _clampRest(offset, size);
-    final side = math.max(0.0, _cardInset - _screenMargin) + _dragGive;
+    final base = (size.width - CollapsedCallCard.width) / 2;
+    final side = math.max(0.0, base - _screenMargin) + _dragGive;
     return Offset(offset.dx.clamp(-side, side).toDouble(), rest.dy);
   }
 
@@ -433,6 +442,9 @@ class _CallCardLayerState extends State<CallCardLayer> with SingleTickerProvider
     if (_host.call == null) {
       _stopSnap();
       _cardOffset.value = Offset.zero;
+      // 通话没了就把原生标志一起清掉：留着它，下一次在对话页按返回
+      // 会被当成「还在通话」而缩进小窗。
+      unawaited(setCallActive(false));
     }
     // The call, its shape, or its status changed: redraw (what shows — the
     // card, its status, her small window — is decided in build).
@@ -454,6 +466,9 @@ class _CallCardLayerState extends State<CallCardLayer> with SingleTickerProvider
   /// 收起状态按返回：进画中画，而不是让系统把 App 裸送进后台（麦克风会
   /// 被掐、回来后每一句都发不出去）。小窗用不了就退回通话页。
   Future<void> _leaveToPip(BuildContext context) async {
+    final call = _host.call;
+    // 没有活通话就绝不能进小窗：哪怕 PopScope 因为状态残留误拦了一次返回。
+    if (call == null || call.phase == CallPhase.ended) return;
     final entered = await enterPictureInPicture();
     if (entered || !context.mounted) return;
     if (_host.collapsed && !_host.pageUp) await _host.expand(context);
@@ -465,14 +480,16 @@ class _CallCardLayerState extends State<CallCardLayer> with SingleTickerProvider
       valueListenable: pictureInPictureMode,
       builder: (context, pip, _) {
         final call = _host.call;
+        final liveCall = call != null && call.phase != CallPhase.ended;
         final collapsed = _host.collapsed && !_host.pageUp;
-        final small = pip && collapsed && call != null;
+        final small = pip && collapsed && liveCall;
         // 恒定结构：PopScope → Stack → [页面, 覆盖层]。状态切换只改属性，
         // 下面的页面树永远不卸载。发起通话的聊天页持有会话绑定，拆了它，
         // 回来后每一句都「没发出去，再说一次」。
         return PopScope(
-          // 收起状态按返回不退出 App：交给画中画，通话继续。
-          canPop: !collapsed,
+          // 只有「确实有活通话、而且收起了」才拦返回交给画中画。
+          // 没有通话时按返回就是正常退后台，别把人塞进小窗。
+          canPop: !collapsed || !liveCall,
           onPopInvokedWithResult: (didPop, _) {
             if (!didPop) unawaited(_leaveToPip(context));
           },
@@ -481,21 +498,29 @@ class _CallCardLayerState extends State<CallCardLayer> with SingleTickerProvider
             children: [
               Offstage(offstage: small, child: widget.child),
               if (small)
-                Positioned.fill(child: callPipView(l10n: context.l10n, theme: Theme.of(context), call: call))
+                Positioned.fill(
+                  child: callPipView(
+                    l10n: context.l10n,
+                    theme: Theme.of(context),
+                    call: call,
+                    // 和整页同一个视觉设置：用户选了声波环，小窗也别变成玻璃球。
+                    visual: ProviderScope.containerOf(context, listen: false)
+                        .read(callSettingsProvider)
+                        .visual,
+                  ),
+                )
               else if (collapsed && call != null)
                 ValueListenableBuilder<Offset>(
                   valueListenable: _cardOffset,
                   // 布局位置真的跟着拖，命中区域也跟着走。用 Transform 只挪
                   // 绘制、不挪布局盒子，卡片拖走后按钮就点不到了。
                   builder: (_, offset, child) => Positioned(
-                    left: _cardInset + offset.dx,
-                    right: _cardInset - offset.dx,
+                    left: (MediaQuery.sizeOf(context).width - CollapsedCallCard.width) / 2 + offset.dx,
+                    width: CollapsedCallCard.width,
                     bottom: 20 - offset.dy,
                     child: child!,
                   ),
-                  child: RepaintBoundary(
-                    child: Align(alignment: Alignment.center, child: _card(context, call)),
-                  ),
+                  child: RepaintBoundary(child: _card(context, call)),
                 )
               else
                 const SizedBox.shrink(),
