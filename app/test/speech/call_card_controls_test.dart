@@ -113,9 +113,14 @@ void main() {
       await tester.pump(const Duration(milliseconds: 60));
     }
     final after = tester.getRect(card);
+    final layer = tester.getRect(find.byType(CallCardLayer));
 
     expect(after.top, lessThan(before.top - 100), reason: '拖上去 160，卡片得跟着走');
-    expect(after.left, lessThan(before.left - 40), reason: '拖左 80，卡片得跟着走');
+    // 卡片是横贯屏幕的一条，左右本来没有可挪的余量：硬放行那个自由度，
+    // 正是把静音键推出屏幕、真机上报「多拖几次就卡死」的根因。松手只留
+    // 一点点跟手位移并吸附回屏内，所以这里钉「不出界」而不是「往左跑 40」。
+    expect(after.left, greaterThanOrEqualTo(layer.left), reason: '卡片左边不能出屏幕');
+    expect(after.right, lessThanOrEqualTo(layer.right), reason: '卡片右边不能出屏幕');
 
     // 拖动不能吃掉按钮的单击：展开键照旧把页面带回来。
     await tester.tap(find.byKey(const ValueKey('call-expand')));
@@ -256,6 +261,50 @@ void main() {
     expect(active, isTrue);
     await collapse(tester);
     expect(active, isTrue, reason: '页面 pop 掉不能把原生通话标志关掉，否则按返回只会裸退后台');
+  });
+
+  testWidgets('连着拖好几次也不会把卡片拖出屏幕：四个键一直点得到', (tester) async {
+    await pumpHosted(tester);
+    await collapse(tester);
+    final card = find.byKey(const ValueKey('call-collapsed'));
+    final layer = tester.getRect(find.byType(CallCardLayer));
+    final before = tester.getRect(card);
+
+    // 真人就是这么一点点往同一个方向推卡片的。卡片是横贯屏幕的一条，
+    // 横向一旦按「小浮窗」的半径放行，几个回合下来左半截连静音键一起
+    // 滑出屏幕，手再按到卡片上就既拖不动也点不到 —— 看着就是「卡死」。
+    for (final delta in const <Offset>[
+      Offset(-70, -140),
+      Offset(-70, -120),
+      Offset(-70, 90),
+      Offset(-70, 120),
+      Offset(-70, -200),
+    ]) {
+      await tester.drag(card, delta);
+      for (var i = 0; i < 8; i++) {
+        await tester.pump(const Duration(milliseconds: 60));
+      }
+      final rect = tester.getRect(card);
+      expect(rect.left, greaterThanOrEqualTo(layer.left), reason: '卡片左边出了屏幕，静音键就再也点不到');
+      expect(rect.right, lessThanOrEqualTo(layer.right), reason: '卡片右边出了屏幕，挂断键就再也点不到');
+      expect(rect.top, greaterThanOrEqualTo(layer.top), reason: '卡片顶边出了屏幕');
+      expect(rect.bottom, lessThanOrEqualTo(layer.bottom), reason: '卡片底边出了屏幕');
+    }
+
+    // 修「不出界」不能把拖动本身修没：上下仍要能把卡片挪开挡住的内容。
+    expect(tester.getRect(card).top, lessThan(before.top - 180),
+        reason: '竖向仍要能大幅拖动，卡片该挪得上去');
+
+    // 拖完还得像活着一样：能静音、能展开，通话没断。
+    await tester.tap(find.byKey(const ValueKey('call-collapsed-mute')));
+    await tester.pump();
+    expect(VoiceCallHost.instance.call!.muted, isTrue);
+    await tester.tap(find.byKey(const ValueKey('call-expand')));
+    for (var i = 0; i < 25; i++) {
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+    expect(find.byType(VoiceCallPage), findsOneWidget);
+    expect(VoiceCallHost.instance.call!.phase, isNot(CallPhase.ended));
   });
 
   test('会话只解析一次：发起页后来失效也不影响这通电话', () async {
