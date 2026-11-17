@@ -154,6 +154,20 @@ class MainActivity : FlutterActivity() {
         applyRefreshRate()
         // 锁屏回来了：从「锁屏不算后台」改回正常判断。
         appChannel?.invokeMethod("callScreenLocked", false)
+        // 回到前台就把 PiP 的 autoEnter 与当前通话状态重新对齐。
+        // setCallActive(false) 那次 setPictureInPictureParams 可能因 Activity
+        // 当时不在前台而没落上去，系统会一直记着 autoEnter=true；那样即使
+        // 根本没有通话，下一次按返回/home 也会自动把页面缩成小窗。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            runCatching {
+                setPictureInPictureParams(
+                    PictureInPictureParams.Builder()
+                        .setAspectRatio(Rational(3, 4))
+                        .setAutoEnterEnabled(callActive)
+                        .build(),
+                )
+            }
+        }
     }
 
     /**

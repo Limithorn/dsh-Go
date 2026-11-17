@@ -149,50 +149,172 @@ Future<void> pushVoiceCallPage(
   };
 }
 
-/// 画中画小窗里的样子：一只鲸鱼娘立绘 + 一句状态。
+/// 整页和小窗共用的那颗光球：按设置画玻璃球或声波环，都由 [scene] 驱动。
+/// 抽出来是为了小窗不再贴一张静态图，而是和通话界面同一套动画。
+class CallOrb extends StatelessWidget {
+  const CallOrb({
+    super.key,
+    required this.scene,
+    required this.call,
+    required this.visual,
+    required this.palette,
+    required this.dark,
+    required this.size,
+  });
+
+  final CallScene scene;
+  final VoiceCallController call;
+  final CallVisual visual;
+  final CallPalette palette;
+  final bool dark;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    if (visual == CallVisual.glass) {
+      return CallLight(key: const ValueKey('glass'), scene: scene, palette: palette, size: size);
+    }
+    final phase = call.phase;
+    return VoiceRing(
+      key: ValueKey(visual),
+      type: visual == CallVisual.mono ? VoiceRingType.mono : VoiceRingType.ring,
+      state: switch (phase) {
+        CallPhase.starting || CallPhase.thinking => VoiceRingState.processing,
+        CallPhase.listening || CallPhase.hearing => VoiceRingState.listening,
+        CallPhase.speaking => VoiceRingState.speaking,
+        CallPhase.ended => VoiceRingState.idle,
+      },
+      size: size * 0.82,
+      theme: dark ? VoiceRingTheme.dark : VoiceRingTheme.light,
+      paused: phase == CallPhase.ended,
+      level: () => switch (call.phase) {
+        CallPhase.hearing when !call.muted => VoiceRingLevel.mic(call.micLevel),
+        CallPhase.speaking => VoiceRingLevel.playback(call.voiceLevel),
+        _ => 0,
+      },
+    );
+  }
+}
+
+/// 画中画小窗里的样子：通话界面那颗**动态**光球 + 一句状态。
 ///
 /// 小窗是方的、宽度只有屏幕的三分之一，整页缩进去会挤成一片，所以单独排。
-/// 小窗里不做可点的控件：Android 把小窗里的单击拿去展开系统控制，双击才回 App，
-/// 按钮画得再好也点不到。所以小窗只负责「让人一眼看出还在通话」：
-/// 宠物 + 一句状态，想操作就双击回 App。
+/// 小窗里不做可点控件：Android 把小窗里的单击拿去展开系统控制，双击才回 App，
+/// 按钮画得再好也点不到。想操作就双击回 App。
 ///
+/// 光球自己持有一个 [CallScene]，由 [CallClock] 每帧推进。PiP 时原生特意
+/// 不停帧（MainActivity.onPause），所以小窗里它一直是活的，不是定格图。
 /// 收起状态下页面已经 pop 了，这副样子也由 CallCardLayer 画给画中画。
-Widget callPipView({required L10n l10n, required ThemeData theme, required VoiceCallController call, bool signedIn = false}) {
-  final (status, _) = callStatus(l10n, call, signedIn: () => signedIn);
-  final ink = theme.colorScheme;
-  return ColoredBox(
-    color: ink.surface,
-    child: SafeArea(
-      minimum: const EdgeInsets.all(8),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Center(
-              // 小窗里用贴纸立绘（pip.png，384x519）；精灵条那几张是一排帧，
-              // 缩到小窗里只剩几个像素，看不出是谁。
-              child: Image.asset(
-                'assets/pets/whale-girl/pip.png',
-                fit: BoxFit.contain,
-                filterQuality: FilterQuality.medium,
-              ),
-            ),
+Widget callPipView({
+  required L10n l10n,
+  required ThemeData theme,
+  required VoiceCallController call,
+  bool signedIn = false,
+  CallVisual visual = CallVisual.glass,
+}) =>
+    CallPipView(
+      key: const ValueKey('call-pip-view'),
+      l10n: l10n,
+      theme: theme,
+      call: call,
+      signedIn: signedIn,
+      visual: visual,
+    );
+
+class CallPipView extends StatefulWidget {
+  const CallPipView({
+    super.key,
+    required this.l10n,
+    required this.theme,
+    required this.call,
+    required this.signedIn,
+    required this.visual,
+  });
+
+  final L10n l10n;
+  final ThemeData theme;
+  final VoiceCallController call;
+  final bool signedIn;
+  final CallVisual visual;
+
+  @override
+  State<CallPipView> createState() => _CallPipViewState();
+}
+
+class _CallPipViewState extends State<CallPipView> {
+  final _scene = CallScene();
+  bool _still = false;
+
+  @override
+  void dispose() {
+    _scene.dispose();
+    super.dispose();
+  }
+
+  void _tick(double seconds) {
+    _scene.tick(
+      seconds,
+      phase: widget.call.phase,
+      mic: widget.call.micLevel,
+      voice: widget.call.voiceLevel,
+      isMuted: widget.call.muted,
+      still: _still,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _still = AppMotion.reduced(context);
+    final dark = widget.theme.brightness == Brightness.dark;
+    final palette = CallPalette.of(widget.theme.colorScheme, light: !dark);
+    final (status, _) = callStatus(widget.l10n, widget.call, signedIn: () => widget.signedIn);
+    final fg = dark ? Colors.white : const Color(0xFF14161F);
+    return ColoredBox(
+      color: palette.field,
+      child: CallClock(
+        onTick: _tick,
+        child: SafeArea(
+          minimum: const EdgeInsets.all(6),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final size = math.min(constraints.maxWidth, constraints.maxHeight) * 0.8;
+              return Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: Center(
+                      child: FittedBox(
+                        child: CallOrb(
+                          key: const ValueKey('call-pip-orb'),
+                          scene: _scene,
+                          call: widget.call,
+                          visual: widget.visual,
+                          palette: palette,
+                          dark: dark,
+                          size: size,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Text(
+                      status,
+                      maxLines: 2,
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                      style: widget.theme.textTheme.labelMedium?.copyWith(color: fg),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                ],
+              );
+            },
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Text(
-              status,
-              maxLines: 2,
-              textAlign: TextAlign.center,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelMedium,
-            ),
-          ),
-          const SizedBox(height: 6),
-        ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class VoiceCallPage extends ConsumerStatefulWidget {
@@ -595,32 +717,17 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     return callStatus(l10n, _call, signedIn: () => ref.read(accountProvider).signedIn);
   }
 
-  /// The light in the middle: Libraries.dev's voice ring (its ribbon or its single line),
-  /// listening to the person, speaking with her voice, turning while it thinks; or the glass orb.
-  Widget _light(CallVisual visual, CallPalette palette, bool dark, double size) {
-    if (visual == CallVisual.glass) {
-      return CallLight(key: const ValueKey('glass'), scene: _scene, palette: palette, size: size);
-    }
-    final phase = _call.phase;
-    return VoiceRing(
-      key: ValueKey(visual),
-      type: visual == CallVisual.mono ? VoiceRingType.mono : VoiceRingType.ring,
-      state: switch (phase) {
-        CallPhase.starting || CallPhase.thinking => VoiceRingState.processing,
-        CallPhase.listening || CallPhase.hearing => VoiceRingState.listening,
-        CallPhase.speaking => VoiceRingState.speaking,
-        CallPhase.ended => VoiceRingState.idle,
-      },
-      size: size * 0.82,
-      theme: dark ? VoiceRingTheme.dark : VoiceRingTheme.light,
-      paused: phase == CallPhase.ended,
-      level: () => switch (_call.phase) {
-        CallPhase.hearing when !_call.muted => VoiceRingLevel.mic(_call.micLevel),
-        CallPhase.speaking => VoiceRingLevel.playback(_call.voiceLevel),
-        _ => 0,
-      },
-    );
-  }
+  /// The light in the middle: 整页和小窗共用 [CallOrb]（玻璃球 / 声波环），
+  /// 都由 [_scene] 每帧驱动 —— 听人说话、她在说、思考时各有自己的节奏。
+  Widget _light(CallVisual visual, CallPalette palette, bool dark, double size) => CallOrb(
+        key: ValueKey(visual),
+        scene: _scene,
+        call: _call,
+        visual: visual,
+        palette: palette,
+        dark: dark,
+        size: size,
+      );
 
   /// [child] coming in with the page: a fade and a short rise, starting at [from] (0–1).
   Widget _rise(double from, Widget child, {double distance = 18}) {
@@ -706,16 +813,22 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
   Widget _body(BuildContext context) {
     final l10n = context.l10n;
     final theme = Theme.of(context);
+    final settings = ref.watch(callSettingsProvider);
     // 画中画只有巴掌大，塞整页会把球、字幕、一排按钮挤成一团；
-    // 小窗里只留球、一句状态和一个挂断。
+    // 小窗里只留球和一句状态。
     // 这一条要在收起之前：先收起再按 home 时，小窗里显示的应该是小窗自己的样子，
     // 而不是那张底部卡片。
     if (pictureInPictureMode.value) {
-      return callPipView(l10n: l10n, theme: theme, call: _call, signedIn: ref.read(accountProvider).signedIn);
+      return callPipView(
+        l10n: l10n,
+        theme: theme,
+        call: _call,
+        signedIn: ref.read(accountProvider).signedIn,
+        visual: settings.visual,
+      );
     }
     if (_collapsed) return _collapsedCard(l10n, theme);
     _still = AppMotion.reduced(context);
-    final settings = ref.watch(callSettingsProvider);
     final performance = ref.watch(performanceDefaultsProvider);
     final blur = performance.blur;
     // The keys sit over a field that moves every frame, so their frosting is redone every
@@ -967,6 +1080,10 @@ class CollapsedCallCard extends StatelessWidget {
     this.onMute,
   });
 
+  /// 窄卡片：不是横贯屏幕的一条。留出来的左右余量既是给用户「挪开挡住的内容」，
+  /// 也是拖动边界能真正放开的前提（第三轮按屏宽推 ±8，就是因为宽度被钉死）。
+  static const double width = 248;
+
   final String status;
   final bool ended;
   final L10n l10n;
@@ -977,6 +1094,23 @@ class CollapsedCallCard extends StatelessWidget {
   final bool muted;
   final VoidCallback? onMute;
 
+  /// 四个键压到 38dp：真机上仍是够点的靶子，但一行能塞进一张窄卡片。
+  Widget _key({
+    required String key,
+    required String? tooltip,
+    required Widget icon,
+    required VoidCallback? onPressed,
+  }) =>
+      IconButton(
+        key: ValueKey<String>(key),
+        tooltip: tooltip,
+        icon: icon,
+        onPressed: onPressed,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints.tightFor(width: 38, height: 38),
+        visualDensity: VisualDensity.compact,
+      );
+
   @override
   Widget build(BuildContext context) {
     final ink = theme.colorScheme;
@@ -985,51 +1119,51 @@ class CollapsedCallCard extends StatelessWidget {
       elevation: 10,
       borderRadius: BorderRadius.circular(22),
       color: ink.surfaceContainerHigh,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 6, 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 不是装饰：它和整页那个键一样，是静音/取消静音。
-            IconButton(
-              key: const ValueKey('call-collapsed-mute'),
-              tooltip: muted ? l10n.speechCallUnmute : l10n.speechCallMute,
-              icon: Icon(
-                muted ? AppIcons.micMuted : AppIcons.voice,
-                size: 18,
-                color: muted ? ink.error : ink.primary,
+      child: SizedBox(
+        width: width,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+          child: Row(
+            children: [
+              // 不是装饰：它和整页那个键一样，是静音/取消静音。
+              _key(
+                key: 'call-collapsed-mute',
+                tooltip: muted ? l10n.speechCallUnmute : l10n.speechCallMute,
+                icon: Icon(
+                  muted ? AppIcons.micMuted : AppIcons.voice,
+                  size: 18,
+                  color: muted ? ink.error : ink.primary,
+                ),
+                onPressed: ended || onMute == null ? null : onMute,
               ),
-              onPressed: ended || onMute == null ? null : onMute,
-            ),
-            const SizedBox(width: 4),
-            SizedBox(
-              width: 132,
-              child: Text(
-                status,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium,
+              Expanded(
+                child: Text(
+                  status,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium,
+                ),
               ),
-            ),
-            IconButton(
-              key: const ValueKey('call-expand'),
-              tooltip: l10n.speechCallExpand,
-              icon: const Icon(Icons.open_in_full, size: 18),
-              onPressed: onExpand,
-            ),
-            IconButton(
-              key: const ValueKey('call-picture-in-picture'),
-              tooltip: l10n.speechCallPictureInPicture,
-              icon: const Icon(Icons.picture_in_picture_alt, size: 18),
-              onPressed: ended ? null : onPip,
-            ),
-            IconButton(
-              key: const ValueKey('call-collapsed-hang-up'),
-              tooltip: l10n.speechCallHangUp,
-              icon: Icon(AppIcons.hangUp, size: 20, color: ink.error),
-              onPressed: ended ? null : onHangUp,
-            ),
-          ],
+              _key(
+                key: 'call-expand',
+                tooltip: l10n.speechCallExpand,
+                icon: const Icon(Icons.open_in_full, size: 18),
+                onPressed: onExpand,
+              ),
+              _key(
+                key: 'call-picture-in-picture',
+                tooltip: l10n.speechCallPictureInPicture,
+                icon: const Icon(Icons.picture_in_picture_alt, size: 18),
+                onPressed: ended ? null : onPip,
+              ),
+              _key(
+                key: 'call-collapsed-hang-up',
+                tooltip: l10n.speechCallHangUp,
+                icon: Icon(AppIcons.hangUp, size: 20, color: ink.error),
+                onPressed: ended ? null : onHangUp,
+              ),
+            ],
+          ),
         ),
       ),
     );
