@@ -36,6 +36,7 @@ class PcmStream(
     private val main: Handler,
     private val listener: Listener,
     private val context: Context? = null,
+    startOnSpeaker: Boolean = true,
 ) {
     interface Listener {
         fun onStart(stream: PcmStream)
@@ -59,8 +60,8 @@ class PcmStream(
     @Volatile var started = false
         private set
 
-    /** 免提开着吗。建流时按它定输出设备，之后 callSpeaker 改。 */
-    @Volatile private var speakerOn = true
+    /** 免提开着吗。建流时按它定使用与输出设备，之后 callSpeaker 改。 */
+    @Volatile private var speakerOn = startOnSpeaker
 
     /**
      * 免提开关：让声音走扬声器或听筒。
@@ -81,6 +82,18 @@ class PcmStream(
         runCatching { t.preferredDevice = target }
     }
 
+    /**
+     * 声音要从内置听筒出来：通话中、免提关着，且当前通信设备就是听筒。
+     * 有耳机/蓝牙在场时仍走媒体（蓝牙能走高清），不因为切听筒把它拉到 SCO。
+     */
+    private fun ears(): Boolean {
+        if (!call || speakerOn) return false
+        val am = context?.getSystemService(AudioManager::class.java) ?: return true
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+        val device = runCatching { am.communicationDevice }.getOrNull()
+        return device == null || device.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+    }
+
     fun open(): Boolean {
         val min = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (min <= 0) return false
@@ -88,10 +101,15 @@ class PcmStream(
             AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
-                        // 通话里曾经走 USAGE_VOICE_COMMUNICATION，音声沿着那条道出去，
-                        // 音量被通话音量管着，听着总是很小。改成 MEDIA：和播放音乐同一条道，
-                        // 安静通话也听得清；回声由采集侧的 AcousticEchoCanceler 管。
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        // 音量流跟 usage 走，不跟设备走。
+                        // 免提：媒体。和放音乐同一条道，音量大、蓝牙走高清，音量键调的是音乐。
+                        // 听筒：通话。系统把它当通话音频，音量键调的就是通话音量，
+                        //       和系统电话一个语义（之前一律用媒体，调听筒音量时实际在调音乐音量）。
+                        // 通信模式与输出设备由 SpeechPlugin 的 setMode/setCommunicationDevice 管。
+                        .setUsage(
+                            if (ears()) AudioAttributes.USAGE_VOICE_COMMUNICATION
+                            else AudioAttributes.USAGE_MEDIA,
+                        )
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build(),
                 )
