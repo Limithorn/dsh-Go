@@ -12,6 +12,7 @@ import 'package:dsh_app/speech/voice_cloud.dart';
 import 'package:dsh_app/state/picture_in_picture.dart';
 import 'package:dsh_app/state/voice_call_host.dart';
 import 'package:dsh_app/state/voice_state.dart';
+import 'package:dsh_app/ui/speech/call/call_parts.dart';
 import 'package:dsh_app/ui/speech/call/call_visuals.dart';
 import 'package:dsh_app/ui/speech/voice_call_page.dart';
 import 'package:flutter/material.dart';
@@ -417,6 +418,78 @@ void main() {
         reason: '小窗里动画要一直活着');
   });
 
+  testWidgets('小窗光球下面叠着背景光晕，状态文字照样读得清', (tester) async {
+    await pumpHosted(tester);
+    await collapse(tester);
+    pictureInPictureMode.value = true;
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+
+    final pip = find.byKey(const ValueKey('call-pip-view'));
+    final field = find.descendant(of: pip, matching: find.byType(CallField));
+    expect(field, findsOneWidget, reason: '整页那层背景光晕小窗也得有，浅色主题下才不素');
+    final fieldWidget = tester.widget<CallField>(field);
+    expect(fieldWidget.center, inInclusiveRange(0.3, 0.55),
+        reason: '光晕要衬在光球后面，别压到下面那行状态文字上');
+
+    // 光晕和光球得是同一颗场景驱动的：两层各走各的会错拍。
+    final orb = tester.widget<CallOrb>(find.byKey(const ValueKey('call-pip-orb')));
+    expect(identical(fieldWidget.scene, orb.scene), isTrue,
+        reason: '小窗里的光晕和光球得共用同一个 CallScene');
+
+    // 叠了光晕之后文字还读得清：按光晕最浓的时候（呼吸和声音都满）算底色，仍要过 4.5:1。
+    final text = tester.widget<Text>(find.descendant(of: pip, matching: find.byType(Text)).first);
+    final palette = fieldWidget.palette;
+    final lit = (0.275 * fieldWidget.strength).clamp(0.0, 1.0);
+    final worst = Color.alphaBlend(palette.main.withValues(alpha: lit), palette.field);
+    expect(_contrast(text.style!.color!, worst), greaterThanOrEqualTo(4.5),
+        reason: '光晕不能把状态文字糊掉');
+
+    // 小窗里的单击被系统拿去展开控制，所以这里一个可点控件都不放。
+    expect(find.descendant(of: pip, matching: find.byType(IconButton)), findsNothing);
+    expect(find.descendant(of: pip, matching: find.byType(TextButton)), findsNothing);
+  });
+
+  testWidgets('小窗里的光晕跟着动画走，不是一张定格的底图', (tester) async {
+    await pumpHosted(tester);
+    await collapse(tester);
+    pictureInPictureMode.value = true;
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+
+    CallField pipField() => tester.widget<CallField>(
+          find.descendant(
+            of: find.byKey(const ValueKey('call-pip-view')),
+            matching: find.byType(CallField),
+          ),
+        );
+
+    final before = pipField().scene.flow;
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    final after = pipField().scene.flow;
+    expect(after, greaterThan(before), reason: 'PiP 时不停帧：光晕也得跟着呼吸和流动');
+  });
+
+  testWidgets('从卡片展开回整页：计时接着走，不掉回 --:--', (tester) async {
+    await pumpHosted(tester);
+    final first = tester.widget<CallTimer>(find.byType(CallTimer));
+    expect(first.since, isNotNull, reason: '通话开始了就该计时');
+
+    await collapse(tester);
+    await tester.tap(find.byKey(const ValueKey('call-expand')));
+    for (var i = 0; i < 25; i++) {
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+    expect(find.byType(VoiceCallPage), findsOneWidget, reason: '展开得把整页带回来');
+    expect(find.text('--:--'), findsNothing, reason: '展开回来要接着计时，不是一张空表');
+    final again = tester.widget<CallTimer>(find.byType(CallTimer));
+    expect(again.since, first.since, reason: '计时起点是这通电话的，不是这次页面打开的');
+  });
+
   test('会话只解析一次：发起页后来失效也不影响这通电话', () async {
     var calls = 0;
     var alive = true;
@@ -429,6 +502,15 @@ void main() {
     expect(await pinned.id(), 'session-1', reason: 'id 一旦拿到就是这通电话的，不再问发起页');
     expect(calls, 1);
   });
+}
+
+/// 两色之间的对比度（WCAG 口径，1 到 21）。
+double _contrast(Color a, Color b) {
+  final la = a.computeLuminance();
+  final lb = b.computeLuminance();
+  final hi = la > lb ? la : lb;
+  final lo = la > lb ? lb : la;
+  return (hi + 0.05) / (lo + 0.05);
 }
 
 /// 发起页的替身：它在不在、有没有被重建，一眼看得出来。

@@ -224,7 +224,13 @@ Offset _wander(double t, double a, double b, double phase) {
 
 /// The field, with a faint light of the theme's colour behind where the sphere sits.
 class CallField extends StatelessWidget {
-  const CallField({super.key, required this.scene, required this.palette, this.center = 0.4});
+  const CallField({
+    super.key,
+    required this.scene,
+    required this.palette,
+    this.center = 0.4,
+    this.strength = 1,
+  });
 
   final CallScene scene;
   final CallPalette palette;
@@ -232,18 +238,26 @@ class CallField extends StatelessWidget {
   /// The sphere's height on the screen (0 top, 1 bottom).
   final double center;
 
+  /// How much light there is. The page keeps 1; a window a third of the
+  /// screen's width wants a little more to look the same at that size.
+  final double strength;
+
   @override
   Widget build(BuildContext context) => RepaintBoundary(
-    child: CustomPaint(painter: _FieldPainter(scene, palette, center), child: const SizedBox.expand()),
+    child: CustomPaint(
+      painter: _FieldPainter(scene, palette, center, strength),
+      child: const SizedBox.expand(),
+    ),
   );
 }
 
 class _FieldPainter extends CustomPainter {
-  _FieldPainter(this.scene, this.palette, this.center) : super(repaint: scene);
+  _FieldPainter(this.scene, this.palette, this.center, this.strength) : super(repaint: scene);
 
   final CallScene scene;
   final CallPalette palette;
   final double center;
+  final double strength;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -251,14 +265,14 @@ class _FieldPainter extends CustomPainter {
     final at = Offset(size.width / 2, size.height * center);
     final radius = size.width * (0.9 + scene.energy * 0.1 + (scene.breath - 0.5) * 0.04 * scene.depth);
     final tint = _drain(palette.main, scene.muted);
-    final strength = (palette.light ? 0.2 : 0.12) + scene.energy * 0.05 + scene.breath * 0.025 * scene.depth;
+    final lit = ((palette.light ? 0.2 : 0.12) + scene.energy * 0.05 + scene.breath * 0.025 * scene.depth) * strength;
     canvas.drawCircle(
       at,
       radius,
       Paint()
         ..shader = RadialGradient(
           colors: [
-            tint.withValues(alpha: strength * scene.appear),
+            tint.withValues(alpha: lit * scene.appear),
             tint.withValues(alpha: 0),
           ],
         ).createShader(Rect.fromCircle(center: at, radius: radius)),
@@ -266,31 +280,44 @@ class _FieldPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_FieldPainter old) => old.center != center || old.palette != palette;
+  bool shouldRepaint(_FieldPainter old) =>
+      old.center != center || old.palette != palette || old.strength != strength;
 }
 
 /// The sphere of glass. Its resting diameter is [size] × 0.5; the rest is its glow.
 class CallLight extends StatelessWidget {
-  const CallLight({super.key, required this.scene, required this.palette, this.size = 300});
+  const CallLight({
+    super.key,
+    required this.scene,
+    required this.palette,
+    this.size = 300,
+    this.halo = 1,
+  });
 
   final CallScene scene;
   final CallPalette palette;
   final double size;
 
+  /// How much of the outer halo there is. The page keeps 1; in a window a
+  /// third of the screen's width the same halo reads as a grey disc round a
+  /// small sphere, so it is softened there.
+  final double halo;
+
   @override
   Widget build(BuildContext context) => RepaintBoundary(
     child: SizedBox.square(
       dimension: size,
-      child: CustomPaint(painter: _GlassPainter(scene, palette)),
+      child: CustomPaint(painter: _GlassPainter(scene, palette, halo)),
     ),
   );
 }
 
 class _GlassPainter extends CustomPainter {
-  _GlassPainter(this.scene, this.palette) : super(repaint: scene);
+  _GlassPainter(this.scene, this.palette, this.halo) : super(repaint: scene);
 
   final CallScene scene;
   final CallPalette palette;
+  final double halo;
 
   // How each light inside wanders, and how big it is.
   static const _paths = [
@@ -313,7 +340,8 @@ class _GlassPainter extends CustomPainter {
     final strength = ((light ? 0.58 : 0.5) + scene.glow * 0.6) * fade;
     final disc = Rect.fromCircle(center: center, radius: r);
 
-    // Outside: a soft halo of the theme's colour.
+    // Outside: a soft halo of the theme's colour. In a small window the same
+    // blur would read as a solid disc, so the halo is spread wider there.
     final halo = tones[2].withValues(alpha: ((light ? 0.28 : 0.18) + scene.glow * 0.45) * fade);
     // A disc of r·1.02 blurred by σ = r·0.45, drawn as that blur's own falloff
     // (full well inside, half at the edge, gone 2.5σ out): a mask blur that
@@ -323,6 +351,7 @@ class _GlassPainter extends CustomPainter {
       center,
       outer,
       Paint()
+        // 用渐变换掉 mask blur：同一帧里 σ 那么大的模糊是通话页卡顿的根源。
         ..shader = RadialGradient(
           colors: [
             halo,

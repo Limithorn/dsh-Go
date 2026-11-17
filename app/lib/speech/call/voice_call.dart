@@ -142,6 +142,11 @@ class VoiceCallController extends ChangeNotifier {
   bool _asking = false;
 
   CallPhase _phase = CallPhase.starting;
+
+  /// When the person could first talk: the clock on the page counts from here,
+  /// not from when the page was pushed, so 收起 and 展开 keep counting.
+  DateTime? _startedAt;
+  DateTime? get startedAt => _startedAt;
   CallEnd? _ended;
   bool _muted = false;
   bool _speaker = true;
@@ -682,6 +687,7 @@ class VoiceCallController extends ChangeNotifier {
 
   void _set(CallPhase phase) {
     if (_phase != phase && phase == CallPhase.listening) {
+      _startedAt ??= DateTime.now();
       unawaited(const DiagnosticsChannel().recordVoiceStage('listening'));
     }
     _phase = phase;
