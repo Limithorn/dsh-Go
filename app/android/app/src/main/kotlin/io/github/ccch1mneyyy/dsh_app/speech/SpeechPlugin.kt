@@ -162,7 +162,9 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
         val forCall = call.argument<Boolean>("call") == true
         val levels = call.argument<Boolean>("levels") == true
         stream?.stop()
-        val s = PcmStream(id, rate, forCall, levels, main, streamListener, context)
+        val s = PcmStream(id, rate, forCall, levels, main, streamListener, context, speaker)
+        // 建流时就把当前免提状态交给它：open() 里按它选音量流（听筒走通话、免提走媒体），
+        // 也按它定输出设备。之前这里是 open() 之后再 setSpeaker，选 usage 的那一步只看得到默认的真。
         if (!s.open()) return false
         // 开流时就按当前的免提状态把输出设备定下来：免提键往往在她不说话时按，
         // 那时 stream 还是 null，只靠 callSpeaker 里的那一次会落空。
