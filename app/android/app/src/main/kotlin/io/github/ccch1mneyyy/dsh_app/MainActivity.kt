@@ -12,7 +12,6 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import android.view.KeyEvent
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -386,23 +385,6 @@ class MainActivity : FlutterActivity() {
     // onUserLeaveHint, so autoEnter never runs, the microphone is taken away and
     // every spoken sentence fails to reach the conversation afterwards. Dart
     // asks for PiP itself when 收起; this is the fallback for any other pop.
-    /**
-     * 通话中把音量键留给通话。它调的是这一路的增益（SpeechPlugin.nudgeGain），
-     * 不是系统任何一条音量流：Pixel 的策略把这条音轨的增益并进了媒体组，
-     * 音量键指向通话音量反而没用（通话音量 7 与 1 的输出功率都是 -33.0 dB）。
-     * 返回 true 表示不再交给系统，所以系统音量条不会弹出，也不会动别的 App。
-     */
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        val code = event.keyCode
-        if (callActive && (code == KeyEvent.KEYCODE_VOLUME_UP || code == KeyEvent.KEYCODE_VOLUME_DOWN)) {
-            if (event.action == KeyEvent.ACTION_DOWN) {
-                io.github.ccch1mneyyy.dsh_app.speech.SpeechPlugin.live
-                    ?.nudgeGain(code == KeyEvent.KEYCODE_VOLUME_UP)
-            }
-            return true
-        }
-        return super.dispatchKeyEvent(event)
-    }
 
     override fun popSystemNavigator(): Boolean {
         if (callActive && enterPip()) return true
