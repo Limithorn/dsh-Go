@@ -1,12 +1,8 @@
 package io.github.ccch1mneyyy.dsh_app.speech
 
-import android.content.Context
 import android.media.AudioAttributes
-import android.media.AudioDeviceInfo
 import android.media.AudioFormat
-import android.media.AudioManager
 import android.media.AudioTrack
-import android.os.Build
 import android.os.Handler
 import io.github.ccch1mneyyy.dsh_app.nativemedia.SpeechGate
 import java.util.concurrent.LinkedBlockingQueue
@@ -35,8 +31,6 @@ class PcmStream(
     private val levels: Boolean,
     private val main: Handler,
     private val listener: Listener,
-    private val context: Context? = null,
-    startOnSpeaker: Boolean = true,
 ) {
     interface Listener {
         fun onStart(stream: PcmStream)
@@ -60,28 +54,6 @@ class PcmStream(
     @Volatile var started = false
         private set
 
-    /** 免提开着吗。建流时按它定使用与输出设备，之后 callSpeaker 改。 */
-    @Volatile private var speakerOn = startOnSpeaker
-
-    /**
-     * 免提开关：让声音走扬声器或听筒。
-     *
-     * 不能靠 AudioManager 的通话路由（那个要 MODIFY_AUDIO_SETTINGS，本项目有意移除了），
-     * 而是给这条 AudioTrack 指定输出设备：setPreferredDevice 不需要那个权限。
-     * 必须在 play() 之前设，播到一半再改会被忽略——这是之前按了没反应的原因。
-     */
-    fun setSpeaker(on: Boolean) {
-        speakerOn = on
-        val ctx = context ?: return
-        val t = track ?: return
-        val am = ctx.getSystemService(AudioManager::class.java) ?: return
-        val want = if (on) AudioDeviceInfo.TYPE_BUILTIN_SPEAKER else AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
-        val target = runCatching {
-            am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type == want }
-        }.getOrNull() ?: return
-        runCatching { t.preferredDevice = target }
-    }
-
     fun open(): Boolean {
         val min = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (min <= 0) return false
@@ -91,8 +63,8 @@ class PcmStream(
                     AudioAttributes.Builder()
                         // 一律媒体用法：增益按 STREAM_MUSIC 曲线算（Pixel 4 实测通话
                         // 音量 7 与 1 的输出功率都是 -33 dB，usage 不决定增益）。
-                        // 听筒/免提的区别只在输出设备 preferredDevice（setSpeaker），
-                        // 音量键全程归媒体流，两种出路都能真正调大声小声。
+                        // 免提/听筒的路由交给 SpeechPlugin 的通信模式切换，不在这条轨上
+                        // 设 preferredDevice——那样 patch 会建到 earpiece，轨却留在 SPEAKER。
                         .setUsage(AudioAttributes.USAGE_MEDIA)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build(),
@@ -114,12 +86,9 @@ class PcmStream(
             return false
         }
         bufferBytes = runCatching { t.bufferSizeInFrames * 2 }.getOrDefault(rate * 2 * 2 / 5)
-        // Start playing after 100 ms of audio, not a whole buffer (Android 12+).
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) runCatching { t.setStartThresholdInFrames(rate / 10) }
+        // 不设 setStartThresholdInFrames：它会把轨钉在 FAST 输出上，通信模式切听筒时
+        // 那条 FAST 轨不会跟着 setCommunicationDevice 迁到 earpiece。普通输出即可。
         track = t
-        // 在 play() 之前把输出设备定下来（run 线程里才 play）。
-        // 播到一半再改会被系统忽略，这是免提键之前按了没反应的真正原因。
-        if (call) setSpeaker(speakerOn)
         thread = Thread({ run(t) }, "dsh-speech-pcm").also { it.start() }
         return true
     }

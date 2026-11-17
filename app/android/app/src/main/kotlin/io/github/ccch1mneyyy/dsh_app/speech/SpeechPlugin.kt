@@ -31,10 +31,13 @@ import io.github.ccch1mneyyy.dsh_app.nativemedia.TurnPause
  * Calls — `callStart` {bargeIn, pause} answers "ok", "permission" or "microphone"; `callStop`; `callMute`
  * {on}; `callBargeIn` {on}; `callPause` {pause: quick|normal|patient}; `callPlaying` {on} (another player of the app's voice, such as the phone's
  * own text-to-speech, started or stopped); `callSpeaker` {on}. A call holds the app's one microphone
- * ([MicArbiter]), on the loudspeaker unless a headset is there; the earpiece is selected on the
- * audio track itself (PcmStream.setSpeaker), so the call stays in normal mode and the volume keys
- * keep adjusting media, which is what actually drives this track's gain. The screen stays on meanwhile
- * (a backgrounded app gets no microphone).
+ * ([MicArbiter]). Routing is hybrid: the loudspeaker (the main case) stays in MODE_NORMAL so the
+ * volume keys really drive STREAM_MUSIC — which is what actually drives this PCM track's gain. The
+ * earpiece needs MODE_IN_COMMUNICATION + setCommunicationDevice, because on vendor HALs (Pixel 4)
+ * only the telephony/vocoder path reaches the physical earpiece; while there the volume keys are
+ * pinned to STREAM_VOICE_CALL and won't change this media track — an accepted trade-off (earpiece
+ * is held to the ear, so its preset level is usually enough). The screen stays on meanwhile (a
+ * backgrounded app gets no microphone).
  *
  * Events come back as `event` calls with a `type`: `play` {what: start|done|stopped|error, id},
  * `playLevel` {id, value}, `speechStart` {over}, `utterance` {wav, ms}, `micLevel` {value},
@@ -53,6 +56,8 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
     private var capture: CallCapture? = null
     private var mic = 0
     private var previousMode: Int? = null
+    /** 是否因切到听筒而进了通信模式（Android 12+）；退出/挂断时据此还原。 */
+    private var communicationActive = false
     private var speaker = true
     private var externalPlaying = false
     private var activity: ActivityPluginBinding? = null
@@ -146,10 +151,10 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
             }
             "callSpeaker" -> {
                 speaker = call.argument<Boolean>("on") != false
+                // 路由切换完全交给 route()：听筒进通信模式 + setCommunicationDevice(earpiece)，
+                // 免提回 MODE_NORMAL。不要再碰音轨的 preferredDevice——它会和通信模式的
+                // 设备选择打架，正是方案 X 里 patch 建到 earpiece、轨却留在 SPEAKER 的原因。
                 if (capture != null) route()
-                // 语音回复的音频走媒体通道，AudioManager 的通话路由管不到它；
-                // 直接告诉播放这条流换输出设备，免提键才真的有反应。
-                stream?.setSpeaker(speaker)
                 result.success(speaker)
             }
             else -> result.notImplemented()
@@ -164,13 +169,10 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
         val forCall = call.argument<Boolean>("call") == true
         val levels = call.argument<Boolean>("levels") == true
         stream?.stop()
-        val s = PcmStream(id, rate, forCall, levels, main, streamListener, context, speaker)
-        // 建流时就把当前免提状态交给它：open() 里按它选音量流（听筒走通话、免提走媒体），
-        // 也按它定输出设备。之前这里是 open() 之后再 setSpeaker，选 usage 的那一步只看得到默认的真。
+        // 路由由 route() 的通信模式切换负责，不在这条轨上做；建流只管把 PCM 按媒体
+        // 用法播出来，增益归 STREAM_MUSIC。
+        val s = PcmStream(id, rate, forCall, levels, main, streamListener)
         if (!s.open()) return false
-        // 开流时就按当前的免提状态把输出设备定下来：免提键往往在她不说话时按，
-        // 那时 stream 还是 null，只靠 callSpeaker 里的那一次会落空。
-        if (forCall) s.setSpeaker(speaker)
         stream = s
         if (!forCall && !requestFocus()) {
             s.stop()
@@ -241,10 +243,10 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
         c.bargeIn = bargeIn
         c.pause = pause
         val am = audio
-        // 通信模式不再全程开着（Android 12+）：这条语音轨的增益按媒体流算，
-        // MODE_IN_COMMUNICATION 会把音量键钉到通话流、调了不改声，所以全程留在
-        // MODE_NORMAL，音量键归系统直调媒体流。听筒靠音轨自己的 preferredDevice
-        // 选路（route() → PcmStream.setSpeaker），不需要通信模式。旧设备维持原样。
+        // 混合方案（Android 12+）：默认免提，留在 MODE_NORMAL，音量键直调媒体流
+        // （那条音轨的增益按 STREAM_MUSIC 算）。只有切到听筒时才由 route() 进通信
+        // 模式 + setCommunicationDevice(earpiece)——厂商 HAL 只有这条 vocoder 链路
+        // 才把声音真正送到听筒单元。旧设备（<S）维持全程通信模式，用 isSpeakerphoneOn。
         if (am != null && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             previousMode = am.mode
             runCatching { am.mode = AudioManager.MODE_IN_COMMUNICATION }
@@ -281,25 +283,44 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
     }
 
     /**
-     * 选听筒还是免提/耳机。
+     * 选听筒还是免提/耳机（混合方案）。
      *
-     * 通话全程留在 MODE_NORMAL：这条语音是普通 AudioTrack，增益按 STREAM_MUSIC
-     * 曲线算（Pixel 4 实测通话音量 7 与 1 的输出功率都是 -33.0 dB），所以音量键
-     * 必须归媒体流才有声。MODE_IN_COMMUNICATION 会把音量键钉到通话流，无论
-     * volumeControlStream、remote/local MediaSession 都救不回来（AOSP 源码里
-     * isStreamActive(MUSIC) 时 preferSuggestedStream=true，session 直接被绕过）。
+     * 免提（主场景，Android 12+）：MODE_NORMAL + USAGE_MEDIA，音量键直调 STREAM_MUSIC
+     * ——这是真正驱动这条音轨增益的流，所以按键有效。
      *
-     * 听筒路由交给音轨自己的 preferredDevice（PcmStream.setSpeaker），不需要
-     * 通信模式、不需要 setCommunicationDevice，也不需要 MODIFY_AUDIO_SETTINGS。
+     * 听筒：进 MODE_IN_COMMUNICATION + setCommunicationDevice(earpiece)。普通 AudioTrack
+     * 在通信模式下被 AOSP remap 到 STRATEGY_PHONE，跟着通信设备走；更关键的是只有
+     * 这条 vocoder/HAL 链路能让厂商硬件（Pixel 4 实测）真正把声音送到听筒单元——
+     * 方案 X 的 setPreferredDevice 只建了 patch，轨仍留在 SPEAKER 线程，耳朵听不到。
+     * 代价：通信模式把音量键钉到 STREAM_VOICE_CALL，这条媒体轨不吃它，听筒下音量键
+     * 失效。这是用户确认接受的取舍（贴耳听，预设音量一般够）。
+     *
+     * 旧设备（<S）没有 setCommunicationDevice，维持全程通信模式 + isSpeakerphoneOn。
      */
     @Suppress("DEPRECATION")
     private fun route() {
         val am = audio ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // 全程正常模式：不碰 setMode/setCommunicationDevice，音量键归系统直调
-            // 媒体流；要动的是这条音轨的输出设备（PcmStream.setSpeaker 已处理）。
-            previousMode = null
-            stream?.setSpeaker(speaker)
+            if (!speaker) {
+                // 切到听筒：进通信模式并把通信设备钉在听筒。
+                if (!communicationActive) {
+                    previousMode = am.mode
+                    runCatching { am.mode = AudioManager.MODE_IN_COMMUNICATION }
+                    communicationActive = true
+                }
+                val earpiece = runCatching {
+                    am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                        .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
+                }.getOrNull()
+                if (earpiece != null) runCatching { am.setCommunicationDevice(earpiece) }
+            } else if (communicationActive) {
+                // 切回免提：撤掉通信设备、退出通信模式，音量键重新归媒体流。
+                runCatching { am.clearCommunicationDevice() }
+                val mode = previousMode
+                previousMode = null
+                communicationActive = false
+                if (mode != null) runCatching { am.mode = mode }
+            }
         } else {
             val wired = runCatching {
                 am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type in HEADSETS }
@@ -321,12 +342,14 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
         }
         val am = audio
         val mode = previousMode
+        val wasCommunication = communicationActive
         previousMode = null
+        communicationActive = false
         externalPlaying = false
         if (am != null && mode != null) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && wasCommunication) {
                 runCatching { am.clearCommunicationDevice() }
-            } else {
+            } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
                 runCatching { am.isSpeakerphoneOn = false }
             }
             runCatching { am.mode = mode }

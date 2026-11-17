@@ -27,6 +27,7 @@ import io.github.ccch1mneyyy.dsh_app.files.FilesPlugin
 import io.github.ccch1mneyyy.dsh_app.launch.LaunchScreen
 import io.github.ccch1mneyyy.dsh_app.launch.LaunchThemeSync
 import io.github.ccch1mneyyy.dsh_app.links.LinksPlugin
+import io.github.ccch1mneyyy.dsh_app.notify.CallNotification
 import io.github.ccch1mneyyy.dsh_app.notify.NotifyPlugin
 import io.github.ccch1mneyyy.dsh_app.phone.PhonePlugin
 import io.github.ccch1mneyyy.dsh_app.runtime.LaunchStart
@@ -382,6 +383,10 @@ class MainActivity : FlutterActivity() {
                     // 键指到通话音量反而调不动。挂断就还原，界面里别的按键不受影响。
                     volumeControlStream =
                         if (callActive) AudioManager.STREAM_MUSIC else AudioManager.USE_DEFAULT_STREAM_TYPE
+                    // 常驻"语音通话中"通知：小窗按 x 关掉后通话还在，通知栏让用户看得见；
+                    // 点它回到 App。生命周期跟 callActive 一致，只在通话真正结束时撤掉。
+                    if (callActive) CallNotification.show(applicationContext)
+                    else CallNotification.cancel(applicationContext)
                     // Android 12 起该用 autoEnter：事先告诉系统「我在通话」，
                     // 人一按 home 它自己就缩成小窗。onUserLeaveHint 里再调一次
                     // 在 12+ 上容易被当成「Activity 已经走了」而失败，
