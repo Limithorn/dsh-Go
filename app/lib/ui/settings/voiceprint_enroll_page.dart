@@ -191,6 +191,13 @@ class _VoiceprintEnrollPageState extends ConsumerState<VoiceprintEnrollPage> {
     }
     setState(() {
       _hint = null;
+      // 上一段的实测值和失败原因一起清掉。
+      //
+      // 只清 _hint 会漏出一个死状态：_last 还在、「重录这段」那条依赖
+      // `_last != null && _hint != null`，_hint 一清就不显示了；而「下一步」
+      // 要 _takes.length > _step、「保存」要 _takes.length == 3，两个都不成立。
+      // 三个按钮全不见，界面上没有任何可点的东西——就是"卡死"。
+      _last = null;
       _left = _seconds;
     });
     final ok = await _channel.startRecording();
