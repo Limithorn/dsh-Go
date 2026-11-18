@@ -30,7 +30,6 @@ import '../../speech/speech_out.dart';
 import '../../speech/speech_settings.dart';
 import '../../speech/voice_cloud.dart';
 import '../../state/account_state.dart';
-import '../../state/android_features.dart' show operatingSystemProvider;
 import '../../state/app_notes.dart';
 import '../../state/picture_in_picture.dart';
 import '../../state/voice_call_host.dart';
@@ -215,6 +214,8 @@ Widget callPipView({
   required VoiceCallController call,
   bool signedIn = false,
   CallVisual visual = CallVisual.glass,
+  Widget? backdrop,
+  bool dark = false,
 }) =>
     CallPipView(
       key: const ValueKey('call-pip-view'),
@@ -223,6 +224,8 @@ Widget callPipView({
       call: call,
       signedIn: signedIn,
       visual: visual,
+      backdrop: backdrop,
+      dark: dark,
     );
 
 class CallPipView extends StatefulWidget {
@@ -233,6 +236,8 @@ class CallPipView extends StatefulWidget {
     required this.call,
     required this.signedIn,
     required this.visual,
+    this.backdrop,
+    this.dark = false,
   });
 
   final L10n l10n;
@@ -240,6 +245,15 @@ class CallPipView extends StatefulWidget {
   final VoiceCallController call;
   final bool signedIn;
   final CallVisual visual;
+
+  /// 通话页挑的那张底（海 / 图片 / 她），小窗里铺在光球下面。
+  ///
+  /// 小窗只有一块 3:4 的地方，所以这里要的是「和通话页同一处地方」，
+  /// 不是光球换掉：光球还是画面正中那个，底在它后面。
+  final Widget? backdrop;
+
+  /// 底片在的时候画面按深色走（和通话页同一个判断），状态字才读得出来。
+  final bool dark;
 
   @override
   State<CallPipView> createState() => _CallPipViewState();
@@ -269,19 +283,38 @@ class _CallPipViewState extends State<CallPipView> {
   @override
   Widget build(BuildContext context) {
     _still = AppMotion.reduced(context);
-    final dark = widget.theme.brightness == Brightness.dark;
+    // 有底片就跟通话页一样按深色走：图片或她铺满时，深色字读不出来。
+    final dark = widget.dark || widget.theme.brightness == Brightness.dark;
     final palette = CallPalette.of(widget.theme.colorScheme, light: !dark);
     final (status, _) = callStatus(widget.l10n, widget.call, signedIn: () => widget.signedIn);
     final fg = dark ? Colors.white : const Color(0xFF14161F);
-    return CallClock(
-      onTick: _tick,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
+    // 一圈细边：小窗浮在别人的壁纸上，底片再深也可能和桌面同色，没有边就
+    // 糊成一片看不出窗口在哪儿。深色画面上用亮白描边（0.38 才压得住那片
+    // 深蓝，0.22 几乎看不见），浅色画面上用淡黑描边。
+    final edge = dark ? Colors.white.withValues(alpha: 0.38) : Colors.black.withValues(alpha: 0.14);
+    return DecoratedBox(
+      key: const ValueKey('call-pip-edge'),
+      decoration: BoxDecoration(
+        border: Border.all(color: edge, width: 1.5),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: CallClock(
+          onTick: _tick,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+          // 和通话页同一张底，铺在最下面；光球和光晕都在它上面。
+          if (widget.backdrop case final back?)
+            Positioned.fill(child: IgnorePointer(child: back)),
           // The page's field, so the small window is not a flat swatch of
           // colour: the same faint light sits behind the sphere, a little
           // stronger, since a window this small shows it less.
-          CallField(scene: _scene, palette: palette, strength: 1.7),
+          //
+          // 有底片时不铺主题底色：那整块不透明的 rect 会把刚垫上的图片盖掉，
+          // 人就只看到一片纯色。光晕留着，压在图上当作那团光。
+          CallField(scene: _scene, palette: palette, strength: 1.7, opaque: widget.backdrop == null),
           SafeArea(
             minimum: const EdgeInsets.all(6),
             child: LayoutBuilder(
@@ -322,7 +355,9 @@ class _CallPipViewState extends State<CallPipView> {
               },
             ),
           ),
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -445,6 +480,9 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
             speaker: saved.speaker,
             spokenHint: saved.spoken ? appNote(appL10n.speechCallHint) : null,
             pause: saved.pause,
+            sensitivity: saved.sensitivity,
+            voiceprint: saved.voiceprint,
+            voiceprintOthers: saved.voiceprintOthers,
           );
         },
         permission: () async => await bridge.requestPermission() == VoicePermission.granted,
@@ -611,7 +649,32 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
 
   /// 缩成系统窗口（画中画），通话继续，人可以去做别的事。
   Future<void> _enterPip() async {
-    await enterPictureInPicture();
+    await enterPictureInPicture(dismiss: _closeSheets);
+  }
+
+  /// 把挂在这一页上面的弹层（背景设置那种）都收掉，等它们真的走完。
+  ///
+  /// 那些弹层是 `showModalBottomSheet`，走的是 **root Navigator**——它在
+  /// [CallCardLayer] 外面，比小窗那一层还高。小窗只画 CallCardLayer，管不到
+  /// 它，所以不收掉就会一起被画进小窗（"小窗里怎么是设置页"就是这么来的）。
+  /// 一定要用 rootNavigatorOf，用普通的 Navigator.of 找的是页面自己那层，
+  /// 根本看不见弹层。
+  Future<void> _closeSheets() async {
+    if (!mounted) return;
+    final root = Navigator.of(context, rootNavigator: true);
+    if (!root.canPop()) return;
+    // 弹到这一页为止：这页之上的（弹层）都收掉，下面的（对话页）不动。
+    final route = ModalRoute.of(context);
+    if (route == null) return;
+    var closed = false;
+    root.popUntil((r) {
+      if (identical(r, route)) return true;
+      closed = true;
+      return false;
+    });
+    if (!closed) return;
+    // 收下去的动画要走完：不然原生抓到的还是正在消失的那一帧。
+    await Future<void>.delayed(const Duration(milliseconds: 300));
   }
 
   /// 收起. A hosted call: tell the host and pop this route — the card takes
@@ -858,13 +921,15 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     final blur = performance.blur;
     // The keys sit over a field that moves every frame, so their frosting is redone every
     // frame too: more than HarmonyOS's renderer, or the light mode, can spare.
-    final keyBlur = blur && !performance.lightweight && ref.watch(operatingSystemProvider) != 'ohos';
+    final keyBlur = blur && !performance.lightweight;
     final ended = _call.phase == CallPhase.ended;
     final image =
         settings.backdrop == CallBackdrop.image && settings.image.isNotEmpty && File(settings.image).existsSync()
         ? settings.image
         : null;
     final her = settings.backdrop == CallBackdrop.companion && !_stageFailed;
+    // 海：默认那片深蓝，也是"没有别的底"时的底。它够深，字要浅。
+    final sea = settings.backdrop == CallBackdrop.sea;
     final (status, dots) = _status(l10n);
     final error = _call.error;
     final sessionId = switch (widget.conversation) {
@@ -878,8 +943,9 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     // While the person speaks, her last words step aside for theirs.
     final reply = hearing ? '' : speakable(_call.caption).replaceAll('\n', ' ');
     final failing = ended ? null : error;
-    // Light or dark as the theme is; a picture or her behind always reads as dark.
-    final dark = theme.brightness == Brightness.dark || image != null || her;
+    // 有底片就是深色画面：海是 #10265A→#02050D 那片深蓝，图片和她更不用说。
+    // 只有什么都没有（纯色场）时才跟着主题走。
+    final dark = theme.brightness == Brightness.dark || image != null || her || sea;
     final palette = CallPalette.of(theme.colorScheme, light: !dark);
     final ink = CallInk(dark: dark, child: const SizedBox());
 

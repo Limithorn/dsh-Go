@@ -8,15 +8,18 @@ import 'package:dsh_app/speech/call/chat_call.dart';
 import 'package:dsh_app/speech/call/voice_call.dart';
 import 'package:dsh_app/speech/deepseek_speech.dart';
 import 'package:dsh_app/speech/speech_audio.dart';
+import 'package:dsh_app/speech/speech_settings.dart';
 import 'package:dsh_app/speech/voice_cloud.dart';
 import 'package:dsh_app/state/picture_in_picture.dart';
 import 'package:dsh_app/state/voice_call_host.dart';
 import 'package:dsh_app/state/voice_state.dart';
+import 'package:dsh_app/ui/speech/call/call_backdrop.dart';
 import 'package:dsh_app/ui/speech/call/call_parts.dart';
 import 'package:dsh_app/ui/speech/call/call_visuals.dart';
 import 'package:dsh_app/ui/speech/voice_call_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -451,6 +454,35 @@ void main() {
     expect(find.descendant(of: pip, matching: find.byType(TextButton)), findsNothing);
   });
 
+  testWidgets('小窗铺了底片就不再铺不透明底色，否则图会被盖成一片纯色', (tester) async {
+    // 这是小窗背景不显示的真凶：CallField 以前无条件画满一整块 field 色，
+    // 垫在底下的照片根本露不出来，人看到的就是一片纯色。
+    await pumpHosted(tester);
+
+    // 直接把底片设成「她」：不碰文件系统，也不用去点一层层 UI。
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(CallCardLayer)),
+    );
+    await container.read(callSettingsProvider.notifier).edit(
+          (s) => s.copyWith(backdrop: CallBackdrop.companion),
+        );
+    await tester.pump(const Duration(milliseconds: 100));
+
+    await collapse(tester);
+    pictureInPictureMode.value = true;
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+
+    final field = tester.widget<CallField>(
+      find.descendant(
+        of: find.byKey(const ValueKey('call-pip-view')),
+        matching: find.byType(CallField),
+      ),
+    );
+    expect(field.opaque, isFalse, reason: '有底片时不能铺那块不透明的 field，否则照片被盖成纯色');
+  });
+
   testWidgets('小窗里的光晕跟着动画走，不是一张定格的底图', (tester) async {
     await pumpHosted(tester);
     await collapse(tester);
@@ -501,6 +533,50 @@ void main() {
     alive = false;
     expect(await pinned.id(), 'session-1', reason: 'id 一旦拿到就是这通电话的，不再问发起页');
     expect(calls, 1);
+  });
+
+  testWidgets('小窗的底跟着通话页走：海、图片、她各是一张，没挑就是纯色', (tester) async {
+    // 三个分支都在 callCardBackdrop 里，直接量它，不必每次真去挑背景。
+    final sea = callCardBackdrop(backdrop: CallBackdrop.sea, image: '', her: false);
+    expect(sea, isNotNull, reason: '海是默认底，小窗也得是那片深蓝，不能退回纯色');
+
+    final none = callCardBackdrop(backdrop: CallBackdrop.image, image: '', her: false);
+    expect(none, isNull, reason: '没挑图就没有底，小窗照旧是主题色那块场');
+
+    // 挑了图就交给 ImageBackdrop，不在这里先判文件在不在：多判一道会让
+    // 小窗和通话页的判断分家，出现「整页有图、小窗没图」。
+    final picked = callCardBackdrop(
+      backdrop: CallBackdrop.image,
+      image: '/nowhere/but-still-picked.jpg',
+      her: false,
+    );
+    expect(picked, isA<ImageBackdrop>(), reason: '挑了图就得交给图片那层，画不出来由它自己兜底');
+
+    final her = callCardBackdrop(backdrop: CallBackdrop.companion, image: '', her: true);
+    expect(her, isNotNull);
+    final noHer = callCardBackdrop(backdrop: CallBackdrop.companion, image: '', her: false);
+    expect(noHer, isNull, reason: '她那套没装好，通话页退回纯色，小窗也一样');
+  });
+
+  testWidgets('收起卡片是纯色白卡，不铺底片', (tester) async {
+    await pumpHosted(tester);
+    await collapse(tester);
+
+    final card = find.byKey(const ValueKey('call-collapsed'));
+    expect(card, findsOneWidget);
+
+    // 卡片里不该有底片那几层：它是纯色一条，垫背景会让人以为图片挂在卡片上。
+    expect(
+      find.descendant(of: card, matching: find.byType(ImageBackdrop)),
+      findsNothing,
+      reason: '收起卡片保持纯色，底片只给画中画小窗',
+    );
+
+    // 状态字仍是主题的常规颜色（不是底片态的白）。
+    final status = tester.widget<Text>(
+      find.descendant(of: card, matching: find.byType(Text)).first,
+    );
+    expect(status.style?.color, isNot(Colors.white), reason: '纯色卡片上不该用底片态的白字');
   });
 }
 

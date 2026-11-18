@@ -20104,6 +20104,21 @@ class L10nZh extends L10n {
   String get speechCallBargeInHint => 'AI 说话时你一开口，它先轻下来；「嗯」「对」它接着说，说别的它就停下听你';
 
   @override
+  String get speechCallBargeSensitivity => '插话灵敏度';
+
+  @override
+  String get speechCallBargeSensitivityHint => 'AI 说话时，多响才算你在插话。若它老被自己的声音打断，往右选';
+
+  @override
+  String get speechCallBargeSensitive => '灵敏';
+
+  @override
+  String get speechCallBargeNormal => '标准';
+
+  @override
+  String get speechCallBargeGuarded => '防误触';
+
+  @override
   String get speechCallSpoken => '口语回答';
 
   @override
@@ -20374,6 +20389,364 @@ class L10nZh extends L10n {
 
   @override
   String get wakeWordHint => '填中文，比如 你好肥鱼';
+
+  @override
+  String get wakeSensitivityTitle => '唤醒灵敏度';
+
+  @override
+  String get wakeSensitivityHint => '多像才算是叫它。叫不醒就调灵敏，老被误唤醒就调严格';
+
+  @override
+  String get wakeSensitivitySensitive => '灵敏';
+
+  @override
+  String get wakeSensitivityNormal => '标准';
+
+  @override
+  String get wakeSensitivityStrict => '严格';
+
+  @override
+  String get speechVoiceprintSection => '只认这几个人的声音';
+
+  @override
+  String get speechVoiceprintFooter => '声纹只存在这台手机上，不会上传。录过的人之间可以互相插话——认的是「是不是自己人」，不是「是谁」。';
+
+  @override
+  String get speechVoiceprintSwitch => '只认这几个人的声音';
+
+  @override
+  String get speechVoiceprintSwitchHint => '她说话时，只有录过的人开口才会打断；旁人说话不打断';
+
+  @override
+  String get speechVoiceprintProfiles => '已录入的声音';
+
+  @override
+  String get speechVoiceprintEmpty => '还没录过';
+
+  @override
+  String speechVoiceprintCount(int count) {
+    return '$count 人';
+  }
+
+  @override
+  String get speechVoiceprintOthers => '允许其他人插话';
+
+  @override
+  String get speechVoiceprintOthersHint => '他们说话也能打断，只是她反应会慢一点';
+
+  @override
+  String get speechVoiceprintLevel => '识别灵敏度';
+
+  @override
+  String get speechVoiceprintLevelHint => '宽松更容易认出自己人，严格更不容易把旁人当成自己人';
+
+  @override
+  String get speechVoiceprintLoose => '宽松';
+
+  @override
+  String get speechVoiceprintNormal => '标准';
+
+  @override
+  String get speechVoiceprintStrict => '严格';
+
+  @override
+  String get speechVoiceprintOffHint => '打开上面的开关后，才能录入声音';
+
+  @override
+  String get speechVoiceprintListTitle => '已录入的声音';
+
+  @override
+  String get speechVoiceprintAdd => '添加一个声音';
+
+  @override
+  String get speechVoiceprintFull => '最多 5 个';
+
+  @override
+  String get speechVoiceprintFullHint => '删掉一个才能再录';
+
+  @override
+  String speechVoiceprintRecordedAt(String date) {
+    return '$date 录入';
+  }
+
+  @override
+  String get speechVoiceprintRename => '改个备注';
+
+  @override
+  String get speechVoiceprintDelete => '删掉这个声音';
+
+  @override
+  String get speechVoiceprintDeleteConfirm => '删掉后就认不出这位了。确定吗？';
+
+  @override
+  String get speechVoiceprintEnrollTitle => '录入声音';
+
+  @override
+  String get speechVoiceprintStepOne => '正常音量说点什么';
+
+  @override
+  String get speechVoiceprintStepTwo => '稍微远一点再说';
+
+  @override
+  String get speechVoiceprintStepThree => '带点背景音再说';
+
+  @override
+  String get speechVoiceprintStepHint => '不用念稿，像平时聊天那样就好';
+
+  @override
+  String get speechVoiceprintListening => '正在听…';
+
+  @override
+  String get speechVoiceprintTooQuiet => '太小声了，靠近一点';
+
+  @override
+  String get speechVoiceprintTooNoisy => '有点吵，换个安静些的地方';
+
+  @override
+  String get speechVoiceprintTooShort => '时长不够，再多说一会儿';
+
+  @override
+  String get speechVoiceprintGood => '刚好';
+
+  @override
+  String get speechVoiceprintNext => '下一步';
+
+  @override
+  String get speechVoiceprintRedo => '重录';
+
+  @override
+  String get speechVoiceprintCancel => '取消';
+
+  @override
+  String get speechVoiceprintSaving => '正在比对…';
+
+  @override
+  String get speechVoiceprintSelfCheckFailed => '这段和前后差别太大，重录一次吧';
+
+  @override
+  String get speechVoiceprintDuplicate => '这好像已经录过了';
+
+  @override
+  String speechVoiceprintDuplicateHint(String name) {
+    return '和「$name」很像。要覆盖那一条，还是取消？';
+  }
+
+  @override
+  String get speechVoiceprintOverwrite => '覆盖';
+
+  @override
+  String get speechVoiceprintUnsupported => '这台手机不支持声纹识别';
+
+  @override
+  String get speechVoiceprintAside => '（旁边有人说话，她继续）';
+
+  @override
+  String get speechVoiceprintStart => '开始录音';
+
+  @override
+  String get speechVoiceprintChecking => '正在检查本机支持…';
+
+  @override
+  String get speechVoiceprintReady => '本机支持';
+
+  @override
+  String speechVoiceprintMeter(String ms, String db, String noise) {
+    return '实测：$ms 秒 · 响度 $db dB · 杂音 $noise';
+  }
+
+  @override
+  String get speechVoiceprintDiagnostics => '声纹诊断';
+
+  @override
+  String get speechVoiceprintDiagEmpty => '还没有记录。打一通电话，说几句话，回来这里看。';
+
+  @override
+  String speechVoiceprintDiagYouMin(String score) {
+    return '自己人最低分 $score';
+  }
+
+  @override
+  String speechVoiceprintDiagYouCount(int count) {
+    return '$count 次判成自己人';
+  }
+
+  @override
+  String speechVoiceprintDiagOtherMax(String score) {
+    return '旁人最高分 $score';
+  }
+
+  @override
+  String speechVoiceprintDiagOtherCount(int count) {
+    return '$count 次判成旁人';
+  }
+
+  @override
+  String speechVoiceprintDiagGap(String gap) {
+    return '两堆相隔 $gap';
+  }
+
+  @override
+  String get speechVoiceprintDiagSeparated => '分得开：阈值可以画在中间';
+
+  @override
+  String get speechVoiceprintDiagOverlap => '有重叠：这个档位分不开，换严格一档或重录';
+
+  @override
+  String get speechVoiceprintDiagListTitle => '每一次判定';
+
+  @override
+  String get speechVoiceprintDiagYou => '自己人';
+
+  @override
+  String get speechVoiceprintDiagOther => '旁人';
+
+  @override
+  String get speechVoiceprintDiagUnknown => '认不准';
+
+  @override
+  String get speechVoiceprintDiagOver => '插话时';
+
+  @override
+  String get speechVoiceprintDiagClear => '清空记录';
+
+  @override
+  String get speechVoiceprintDiagSelfCheck => '用你自己的录音自检';
+
+  @override
+  String get speechVoiceprintDiagSelfCheckHint => '拿录入时的音频再比一次，看看你的声音能打多少分。这是阈值的下限参考。';
+
+  @override
+  String get speechVoiceprintDiagSelfCheckRun => '开始自检';
+
+  @override
+  String get speechVoiceprintDiagSelfCheckRunning => '正在比对…';
+
+  @override
+  String speechVoiceprintDiagSelfAvg(String score) {
+    return '你的声音平均 $score';
+  }
+
+  @override
+  String speechVoiceprintDiagSelfMin(String score) {
+    return '$score';
+  }
+
+  @override
+  String get speechVoiceprintDiagSelfAdvice => '阈值应低于这个数，否则你会被当成旁人';
+
+  @override
+  String speechVoiceprintDiagThreshold(String accept, String reject) {
+    return '当前判自己人的线是 $accept，判旁人的线是 $reject';
+  }
+
+  @override
+  String get speechVoiceprintDiagNoProfile => '先录一条声音再自检';
+
+  @override
+  String get speechVoiceprintDiagWhat => '这些分数是每次开口时，你的声音和已录音声纹的相似度。';
+
+  @override
+  String get speechVoiceprintDiagCompare => '比对样本';
+
+  @override
+  String get speechVoiceprintDiagCompareHint => '录一段你自己的、一段旁人的，直接看两者各得多少分。不用打电话，也不用等她说话。';
+
+  @override
+  String get speechVoiceprintDiagOwn => '我的声音';
+
+  @override
+  String get speechVoiceprintDiagOther2 => '旁人的声音';
+
+  @override
+  String get speechVoiceprintDiagRecordOwn => '录一段我的';
+
+  @override
+  String get speechVoiceprintDiagRecordOther => '录一段旁人的';
+
+  @override
+  String get speechVoiceprintDiagRecording => '录音中…请说话';
+
+  @override
+  String get speechVoiceprintDiagNeedProfile => '先录一条声纹，再来试';
+
+  @override
+  String speechVoiceprintDiagOwnScore(String score) {
+    return '你的声音：$score';
+  }
+
+  @override
+  String speechVoiceprintDiagOtherScore(String score) {
+    return '旁人声音：$score';
+  }
+
+  @override
+  String speechVoiceprintDiagAdviceOk(String low, String high) {
+    return '分得开。阈值放在 $low 到 $high 之间都行。';
+  }
+
+  @override
+  String speechVoiceprintDiagAdviceTight(String gap) {
+    return '分得不太开（只差 $gap），建议选严格一档，或重录声纹。';
+  }
+
+  @override
+  String get speechVoiceprintDiagAdviceBad => '分不开：旁人的分比你还高。这个档位不能用，换严格一档并重录。';
+
+  @override
+  String get speechVoiceprintDiagRerecord => '重录';
+
+  @override
+  String get speechVoiceprintDiagTry => '录一句试试';
+
+  @override
+  String get speechVoiceprintDiagTryHint => '点一下，说一句话，立刻告诉你这句被判成什么、多少分。不用打电话。';
+
+  @override
+  String get speechVoiceprintDiagTryRecording => '录音中…请说话';
+
+  @override
+  String speechVoiceprintDiagTryResult(String verdict) {
+    return '这句是 $verdict';
+  }
+
+  @override
+  String speechVoiceprintDiagTryScore(String score, String accept, String reject) {
+    return '相似度 $score（判自己人的线 $accept，判旁人的线 $reject）';
+  }
+
+  @override
+  String get speechVoiceprintDiagTryShort => '说得太短，再来一次';
+
+  @override
+  String get speechVoiceprintDiagTryFail => '这段算不出声纹，重说一次';
+
+  @override
+  String get speechVoiceprintWake => '唤醒时也认声音';
+
+  @override
+  String get speechVoiceprintWakeHint => '叫名字的人不在上面这些声音里，就不答应';
+
+  @override
+  String get speechVoiceprintOthersHint2 => '旁人说话也能打断，只是她会慢一拍；关掉就只有录过的人能打断';
+
+  @override
+  String get speechCallBargeResistant => '更防误触';
+
+  @override
+  String get speechCallBargeStubborn => '最防误触';
+
+  @override
+  String get speechVoiceprintRetryThis => '重录这一段';
+
+  @override
+  String speechVoiceprintRetryThisHint(int count, int left) {
+    return '已经收下 $count 段，还差 $left 段';
+  }
+
+  @override
+  String speechVoiceprintSelfCheckFailedNum(String score, String need) {
+    return '三段之间最不像的一条只有 $score，低于 $need。把最不像那遍重说一次';
+  }
 
   @override
   String starPromptTitle(int hours) {

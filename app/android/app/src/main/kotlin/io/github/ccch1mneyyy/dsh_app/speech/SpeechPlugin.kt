@@ -10,6 +10,8 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import java.io.File
+import android.util.Log
 import android.view.WindowManager
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -17,6 +19,8 @@ import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.github.ccch1mneyyy.dsh_app.nativemedia.MicArbiter
+import io.github.ccch1mneyyy.dsh_app.nativemedia.SpeakerGate
+import io.github.ccch1mneyyy.dsh_app.nativemedia.Thresholds
 import io.github.ccch1mneyyy.dsh_app.nativemedia.NativeTrial
 import io.github.ccch1mneyyy.dsh_app.nativemedia.SpeechGates
 import io.github.ccch1mneyyy.dsh_app.nativemedia.TurnPause
@@ -31,13 +35,13 @@ import io.github.ccch1mneyyy.dsh_app.nativemedia.TurnPause
  * Calls — `callStart` {bargeIn, pause} answers "ok", "permission" or "microphone"; `callStop`; `callMute`
  * {on}; `callBargeIn` {on}; `callPause` {pause: quick|normal|patient}; `callPlaying` {on} (another player of the app's voice, such as the phone's
  * own text-to-speech, started or stopped); `callSpeaker` {on}. A call holds the app's one microphone
- * ([MicArbiter]). Routing is hybrid: the loudspeaker (the main case) stays in MODE_NORMAL so the
- * volume keys really drive STREAM_MUSIC — which is what actually drives this PCM track's gain. The
- * earpiece needs MODE_IN_COMMUNICATION + setCommunicationDevice, because on vendor HALs (Pixel 4)
- * only the telephony/vocoder path reaches the physical earpiece; while there the volume keys are
- * pinned to STREAM_VOICE_CALL and won't change this media track — an accepted trade-off (earpiece
- * is held to the ear, so its preset level is usually enough). The screen stays on meanwhile (a
- * backgrounded app gets no microphone).
+ * ([MicArbiter]). Routing (方案 D): the whole call stays in MODE_IN_COMMUNICATION and only the
+ * communication device switches between speaker and earpiece. This puts the playback track on the
+ * telephony/vocoder path so the echo canceller gets its far-end reference and can cancel the
+ * AI's own voice (which otherwise echoes into the mic and stops the reply as if the user spoke).
+ * Only the vocoder path reaches the physical earpiece on vendor HALs (Pixel 4). Volume keys are
+ * pinned to STREAM_VOICE_CALL in communication mode; whether they still drive this media track is
+ * under A/B verification. The screen stays on meanwhile (a backgrounded app gets no microphone).
  *
  * Events come back as `event` calls with a `type`: `play` {what: start|done|stopped|error, id},
  * `playLevel` {id, value}, `speechStart` {over}, `utterance` {wav, ms}, `micLevel` {value},
@@ -55,10 +59,15 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
 
     private var capture: CallCapture? = null
     private var mic = 0
+
+    /** 录入声纹时占着的麦克风（0 = 没占）。 */
+    private var micVoiceprint = 0
     private var previousMode: Int? = null
     /** 是否因切到听筒而进了通信模式（Android 12+）；退出/挂断时据此还原。 */
     private var communicationActive = false
     private var speaker = true
+    /** 插话灵敏度档位偏移，按用户设置跨通话记住。 */
+    private var bargeOffset: Float = 0f
     private var externalPlaying = false
     private var activity: ActivityPluginBinding? = null
 
@@ -126,11 +135,133 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                 result.success(null)
             }
             "callStart" -> result.success(
-                startCall(call.argument<Boolean>("bargeIn") ?: true, TurnPause.of(call.argument<String>("pause"))),
+                startCall(
+                    call.argument<Boolean>("bargeIn") ?: true,
+                    TurnPause.of(call.argument<String>("pause")),
+                    call.argument<Double>("bargeOffset")?.toFloat() ?: 0f,
+                ),
             )
             "callPause" -> {
                 capture?.pause = TurnPause.of(call.argument<String>("pause"))
                 result.success(null)
+            }
+            "callBargeOffset" -> {
+                bargeOffset = (call.argument<Double>("offset") ?: 0.0).toFloat()
+                capture?.bargeOffset = bargeOffset
+                result.success(null)
+            }
+            "voiceprintConfigure" -> {
+                Voiceprint.warmUp(context.assets)
+                Voiceprint.dumpDir = File(context.getExternalFilesDir(null), "voiceprint-dumps").path
+                val raw = call.argument<List<Map<String, Any?>>>("profiles").orEmpty()
+                val list = raw.mapNotNull { entry ->
+                    val id = entry["id"] as? String ?: return@mapNotNull null
+                    // MethodChannel 过来的是 FloatArray；个别 ROM 会包成 DoubleArray，一并认。
+                    val vec = when (val v = entry["vector"]) {
+                        is FloatArray -> v
+                        is DoubleArray -> FloatArray(v.size) { v[it].toFloat() }
+                        is List<*> -> v.mapNotNull { (it as? Number)?.toFloat() }.toFloatArray()
+                        else -> null
+                    } ?: return@mapNotNull null
+                    SpeakerGate.Profile(id, vec)
+                }
+                Log.i("Voiceprint", "configure: raw=${raw.size} kept=${list.size} enabled=${call.argument<Boolean>("enabled")}")
+                Voiceprint.setConfig(
+                    enabled = call.argument<Boolean>("enabled") == true,
+                    // 唤醒是否也认声音。默认关：唤醒是常开的被动监听，
+                    // 判定次数多、误判代价也大。
+                    wake = call.argument<Boolean>("wake") == true,
+                    allowOthers = call.argument<Boolean>("allowOthers") ?: true,
+                    level = when (call.argument<String>("level")) {
+                        "loose" -> Thresholds.Level.LOOSE
+                        "strict" -> Thresholds.Level.STRICT
+                        else -> Thresholds.Level.NORMAL
+                    },
+                    list = list,
+                )
+                // 门槛随人数重算：人来人往之后不能沿用旧值（5 人删到 1 人要回落）。
+                capture?.currentGate()?.let { g -> (g as? SpeakerGate)?.configure(Voiceprint.cutoffs()) }
+                result.success(Voiceprint.describe())
+            }
+            "voiceprintEnabled" -> {
+                Voiceprint.enabled = call.argument<Boolean>("enabled") == true
+                capture?.currentGate()?.let { g -> (g as? SpeakerGate)?.configure(Voiceprint.cutoffs()) }
+                result.success(null)
+            }
+            "voiceprintAvailable" -> {
+                // 模型 28MB，加载要几百毫秒到几秒；问到的时候往往还没好。
+                // 等它就绪再回答，但不在主线程等。
+                val done = result
+                Thread({
+                    val ok = Voiceprint.availableBlocking(context.assets)
+                    main.post { done.success(ok) }
+                }, "dsh-voiceprint-probe").apply { isDaemon = true }.start()
+            }
+            "voiceprintEmbed" -> {
+                val samples = call.argument<FloatArray>("samples")
+                if (samples == null) {
+                    result.success(null)
+                    return
+                }
+                Voiceprint.warmUp(context.assets)
+                // 录音页会连续调；放到后台线程算，别卡住 UI。
+                Thread({
+                    val v = Voiceprint.embedSamples(samples)
+                    main.post { result.success(v) }
+                }, "dsh-voiceprint-embed").apply { isDaemon = true }.start()
+            }
+            "voiceprintRecordStart" -> {
+                // 通话中不抢麦克风：正打着电话就别录。
+                if (capture != null) {
+                    result.success(false)
+                    return
+                }
+                micVoiceprint = MicArbiter.beginDictation()
+                result.success(VoiceprintRecorder.start())
+            }
+            "voiceprintRecordStop" -> {
+                val samples = VoiceprintRecorder.stop()
+                val token = micVoiceprint
+                micVoiceprint = 0
+                if (token != 0) MicArbiter.endDictation(token)
+                result.success(
+                    mapOf(
+                        "samples" to samples,
+                        "ms" to (samples.size * 1000L / VoiceprintRecorder.RATE),
+                        "loudness" to VoiceprintRecorder.loudness(samples),
+                        "noisiness" to VoiceprintRecorder.noisiness(samples),
+                        // 底噪与"说话时比环境高多少"，界面靠这个判断够不够。
+                        "floor" to VoiceprintRecorder.floor,
+                        "snr" to (VoiceprintRecorder.loudness(samples) - VoiceprintRecorder.floor),
+                    ),
+                )
+            }
+            "voiceprintIsKnown" -> {
+                // 唤醒用：这一段是不是录过的人。音频太短或功能没开都返回 true，
+                // 宁可答应也不让开关变成"叫不应"。
+                val samples = call.argument<FloatArray>("samples")
+                if (samples == null || samples.isEmpty()) {
+                    result.success(true)
+                } else {
+                    val done = result
+                    Thread({
+                        val ok = runCatching { Voiceprint.isKnownVoice(samples) }.getOrDefault(true)
+                        main.post { done.success(ok) }
+                    }, "dsh-voiceprint-known").apply { isDaemon = true }.start()
+                }
+            }
+            "voiceprintLevel" -> result.success(
+                mapOf(
+                    "db" to VoiceprintRecorder.level,
+                    "floor" to VoiceprintRecorder.floor,
+                ),
+            )
+            "voiceprintProbe" -> {
+                val done = result
+                Thread({
+                    val r = VoiceprintRecorder.probeSources()
+                    main.post { done.success(r) }
+                }, "dsh-voiceprint-probe-src").apply { isDaemon = true }.start()
             }
             "callStop" -> {
                 endCall()
@@ -151,9 +282,7 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
             }
             "callSpeaker" -> {
                 speaker = call.argument<Boolean>("on") != false
-                // 路由切换完全交给 route()：听筒进通信模式 + setCommunicationDevice(earpiece)，
-                // 免提回 MODE_NORMAL。不要再碰音轨的 preferredDevice——它会和通信模式的
-                // 设备选择打架，正是方案 X 里 patch 建到 earpiece、轨却留在 SPEAKER 的原因。
+                // 方案 D：全程通信模式，只切通信设备（speaker/earpiece），交给 route()。
                 if (capture != null) route()
                 result.success(speaker)
             }
@@ -232,24 +361,53 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
 
     // ── Calls ─────────────────────────────────────────────────────────────
 
-    private fun startCall(bargeIn: Boolean, pause: TurnPause): String {
+    private fun startCall(bargeIn: Boolean, pause: TurnPause, offset: Float = 0f): String {
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             return "permission"
         }
         endCall()
         mic = MicArbiter.beginDictation()
         val marks = NativeTrial.marks(context.getSharedPreferences("speech_native", Context.MODE_PRIVATE))
-        val c = CallCapture(main, captureListener) { SpeechGates.create(context.assets, it, marks) }
+        // 声纹：先让模型在后台转起来（不阻塞接通），gate 建好之后再包一层。
+        // 模型没就绪、或这台机器加载不了，gateFor 返回 null，行为与原来逐帧一致。
+        Voiceprint.warmUp(context.assets)
+        Voiceprint.onVerdict = { v ->
+            main.post {
+                methods.invokeMethod(
+                    "event",
+                    mapOf(
+                        "type" to "speechJudge",
+                        "over" to v.overPlayback,
+                        "verdict" to when (v.kind) {
+                            SpeakerGate.Kind.YOU -> "you"
+                            SpeakerGate.Kind.OTHER -> "other"
+                            SpeakerGate.Kind.UNKNOWN -> "unknown"
+                        },
+                        "score" to v.score,
+                        "matched" to v.matched,
+                    ),
+                )
+            }
+        }
+        val c = CallCapture(main, captureListener) { echoCancelled ->
+            val base = SpeechGates.create(context.assets, echoCancelled, marks)
+            Voiceprint.gateFor(base) ?: base
+        }
         c.bargeIn = bargeIn
         c.pause = pause
+        bargeOffset = offset
+        c.bargeOffset = offset
         val am = audio
-        // 混合方案（Android 12+）：默认免提，留在 MODE_NORMAL，音量键直调媒体流
-        // （那条音轨的增益按 STREAM_MUSIC 算）。只有切到听筒时才由 route() 进通信
-        // 模式 + setCommunicationDevice(earpiece)——厂商 HAL 只有这条 vocoder 链路
-        // 才把声音真正送到听筒单元。旧设备（<S）维持全程通信模式，用 isSpeakerphoneOn。
-        if (am != null && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        // 方案 D：通话全程进通信模式（含免提）。只有通信模式把播放轨 remap 到
+        // STRATEGY_PHONE / vocoder 链路，AEC 才能从「通信下行」抽到参考、消掉 AI
+        // 自己的声音——否则免提 MODE_NORMAL + USAGE_MEDIA 时 AEC 标志虽 true 却
+        // 拿不到参考，残余回声被 gate 当成插话，造成「 AI 说着说着自己停」。
+        // 代价：通信模式把音量键钉到 STREAM_VOICE_CALL；若这条媒体轨增益仍按
+        // MUSIC，音量键会失效——需真机 A/B 验证，不成立则回退混合方案。
+        if (am != null && previousMode == null) {
             previousMode = am.mode
             runCatching { am.mode = AudioManager.MODE_IN_COMMUNICATION }
+            communicationActive = true
         }
         route()
         if (!c.start()) {
@@ -283,17 +441,15 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
     }
 
     /**
-     * 选听筒还是免提/耳机（混合方案）。
+     * 选听筒还是免提（方案 D：全程通信模式 + 通信设备二选一）。
      *
-     * 免提（主场景，Android 12+）：MODE_NORMAL + USAGE_MEDIA，音量键直调 STREAM_MUSIC
-     * ——这是真正驱动这条音轨增益的流，所以按键有效。
+     * 通话从 startCall 起就进 MODE_IN_COMMUNICATION，免提/听筒只是把通信设备钉到
+     * SPEAKER 或 EARPIECE。这样播放轨（USAGE_MEDIA）在通信模式下被 AOSP remap 到
+     * STRATEGY_PHONE/vocoder 链路：AEC 从通信下行抽到参考、能消掉 AI 回声（根治自打断），
+     * 且厂商 HAL（Pixel 4 实测）能把声音真正送到听筒单元。
      *
-     * 听筒：进 MODE_IN_COMMUNICATION + setCommunicationDevice(earpiece)。普通 AudioTrack
-     * 在通信模式下被 AOSP remap 到 STRATEGY_PHONE，跟着通信设备走；更关键的是只有
-     * 这条 vocoder/HAL 链路能让厂商硬件（Pixel 4 实测）真正把声音送到听筒单元——
-     * 方案 X 的 setPreferredDevice 只建了 patch，轨仍留在 SPEAKER 线程，耳朵听不到。
-     * 代价：通信模式把音量键钉到 STREAM_VOICE_CALL，这条媒体轨不吃它，听筒下音量键
-     * 失效。这是用户确认接受的取舍（贴耳听，预设音量一般够）。
+     * 悬念：通信模式把音量键钉到 STREAM_VOICE_CALL。若这条媒体轨的增益随之改按 VC，
+     * 音量键反而恢复（正统解）；若仍按 MUSIC，则音量键失效——真机 A/B 验证决定去留。
      *
      * 旧设备（<S）没有 setCommunicationDevice，维持全程通信模式 + isSpeakerphoneOn。
      */
@@ -301,26 +457,16 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
     private fun route() {
         val am = audio ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (!speaker) {
-                // 切到听筒：进通信模式并把通信设备钉在听筒。
-                if (!communicationActive) {
-                    previousMode = am.mode
-                    runCatching { am.mode = AudioManager.MODE_IN_COMMUNICATION }
-                    communicationActive = true
-                }
-                val earpiece = runCatching {
-                    am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-                        .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
-                }.getOrNull()
-                if (earpiece != null) runCatching { am.setCommunicationDevice(earpiece) }
-            } else if (communicationActive) {
-                // 切回免提：撤掉通信设备、退出通信模式，音量键重新归媒体流。
-                runCatching { am.clearCommunicationDevice() }
-                val mode = previousMode
-                previousMode = null
-                communicationActive = false
-                if (mode != null) runCatching { am.mode = mode }
+            if (!communicationActive) {
+                previousMode = am.mode
+                runCatching { am.mode = AudioManager.MODE_IN_COMMUNICATION }
+                communicationActive = true
             }
+            val want = if (speaker) AudioDeviceInfo.TYPE_BUILTIN_SPEAKER else AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+            val device = runCatching {
+                am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type == want }
+            }.getOrNull()
+            if (device != null) runCatching { am.setCommunicationDevice(device) }
         } else {
             val wired = runCatching {
                 am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type in HEADSETS }

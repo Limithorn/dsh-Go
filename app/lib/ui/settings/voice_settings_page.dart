@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
 import 'package:dsh_client/dsh_client.dart' show SessionSummary;
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -12,20 +12,20 @@ import '../../speech/wake_words.dart';
 import '../../state/chat_state.dart';
 import '../../state/sessions_state.dart';
 import '../../state/wake_binding.dart';
-import '../../state/wake_state.dart';
 import '../../speech/speech_audio.dart';
 import '../../speech/speech_settings.dart';
-import '../../state/android_features.dart';
 import '../../state/streaming_asr_model_state.dart';
-import '../../state/streaming_asr_state.dart' show SystemAsrReadiness, ohosStreamingAsrReadyProvider;
 import '../../state/voice_model_state.dart';
 import '../../state/voice_settings.dart';
-import '../../state/voice_state.dart';
+import '../../state/wake_sensitivity.dart';
+import '../../state/wake_state.dart';
 import '../common/app_dialog.dart';
 import '../companion/companion_voice_page.dart';
 import '../providers/provider_widgets.dart';
 import '../speech/call/call_backdrop.dart';
+import '../../speech/voiceprint_store.dart';
 import '../shell/page_frame.dart';
+import 'voiceprint_list_page.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 import 'settings_widgets.dart';
@@ -110,7 +110,7 @@ class VoiceSettingsTile extends ConsumerWidget {
     icon: AppIcons.voice,
     tint: tint,
     spot: SettingsIndex.entry(SettingsPageId.voice),
-    value: Text(voiceModeLabel(context.l10n, wordsForIos ? VoiceMode.system : ref.watch(voiceSettingsProvider))),
+    value: Text(voiceModeLabel(context.l10n, ref.watch(voiceSettingsProvider))),
     onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const VoiceSettingsPage())),
   );
 }
@@ -140,15 +140,15 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
               trailing: current == null ? const Icon(AppIcons.selected, size: 20) : null,
               onTap: () => Navigator.of(sheet).pop('new'),
             ),
-            for (final session in sessions)
+            for (final s in sessions.take(40))
               ListTile(
                 title: Text(
-                  _titleOf(session.sessionId),
+                  _titleOf(s.sessionId),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                trailing: current == session.sessionId ? const Icon(AppIcons.selected, size: 20) : null,
-                onTap: () => Navigator.of(sheet).pop(session.sessionId),
+                trailing: current == s.sessionId ? const Icon(AppIcons.selected, size: 20) : null,
+                onTap: () => Navigator.of(sheet).pop(s.sessionId),
               ),
           ],
         ),
@@ -166,8 +166,6 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
     final title = ref.read(chatProvider(sessionId)).title?.trim();
     return (title == null || title.isEmpty) ? _shortId(sessionId) : title;
   }
-
-  String _sessionLabel(String id) => _titleOf(id);
 
   /// 改唤醒词：只收汉字，其他输入当场滤掉（模型只认读音）。
   Future<void> _editWakeWord(String current) async {
@@ -205,6 +203,21 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
     }
   }
 
+  String _sessionLabel(String id) => _titleOf(id);
+
+  /// 换唤醒灵敏度：存下来，正在听的话重载模型（门槛只在建 spotter 时生效）。
+  Future<void> _setWakeSensitivity(WakeSensitivity level) async {
+    if (level == ref.read(wakeSensitivityProvider).value) return;
+    await WakeSensitivityStore.write(level);
+    ref.invalidate(wakeSensitivityProvider);
+    if (!mounted) return;
+    if (ref.read(wakeProvider).enabled) {
+      final wake = ref.read(wakeProvider.notifier);
+      await wake.stop();
+      await wake.start();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -217,16 +230,11 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final harmonyLocal = ref.watch(harmonyLocalVoiceProvider);
-    final stored = ref.watch(voiceSettingsProvider);
-    final selected = harmonyLocal ? voiceModeOnHarmonyLocal(stored) : stored;
-    final ohos = ref.watch(operatingSystemProvider) == 'ohos';
-    final languages = ohos ? ref.watch(voiceCapabilitiesProvider).value?.languages : null;
-    final chineseOnly = languages != null && languages.isNotEmpty && languages.every((l) => l.startsWith('zh'));
+    final selected = ref.watch(voiceSettingsProvider);
     final wake = ref.watch(wakeProvider);
-    // 唤醒词与"叫醒后去哪一间"：和唤醒开关同一段设置里。
     final bound = ref.watch(wakeBindingProvider).value;
     final word = ref.watch(wakeWordProvider).value ?? WakeWords.fallback;
+    final sensitivity = ref.watch(wakeSensitivityProvider).value ?? WakeSensitivity.normal;
     final call = ref.watch(callSettingsProvider);
     final calls = ref.read(callSettingsProvider.notifier);
     return AppPage.list(
@@ -284,58 +292,53 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
               subtitle: bound == null ? l10n.wakeSessionNew : _sessionLabel(bound),
               onTap: () => unawaited(_chooseWakeSession()),
             ),
+            SettingsSegmentTile<WakeSensitivity>(
+              key: const ValueKey('wake-sensitivity'),
+              title: l10n.wakeSensitivityTitle,
+              subtitle: l10n.wakeSensitivityHint,
+              segments: wakeSensitivitySegments(l10n),
+              selected: sensitivity,
+              onChanged: (level) => unawaited(_setWakeSensitivity(level)),
+            ),
           ],
         ),
         SettingsSection(
           title: l10n.voiceModeSection,
-          footer: harmonyLocal ? Text(l10n.harmonyVoiceLocalLine, key: const ValueKey('voice-local-line')) : null,
           children: [
-            if (wordsForIos)
-              SettingsTile(title: voiceModeLabel(l10n, VoiceMode.system), subtitle: l10n.iosVoiceSystemHint),
-            if (!wordsForIos)
-              for (final mode in VoiceMode.values)
-                if (!harmonyLocal || mode != VoiceMode.engine)
-                  Semantics(
-                    checked: selected == mode,
-                    inMutuallyExclusiveGroup: true,
-                    child: SettingsTile(
-                      key: ValueKey('voice-mode-${mode.name}'),
-                      title: voiceModeLabel(l10n, mode),
-                      subtitle: switch (mode) {
-                        VoiceMode.auto => harmonyLocal ? l10n.harmonyVoiceAutoHint : l10n.voiceModeAutoHint,
-                        VoiceMode.deepseek => l10n.voiceModeDeepseekHint,
-                        VoiceMode.system =>
-                          !ohos
-                              ? l10n.voiceModeSystemHint
-                              : chineseOnly
-                              ? l10n.harmonyVoiceSystemHintChinese
-                              : l10n.harmonyVoiceSystemHint,
-                        VoiceMode.engine => l10n.voiceModeEngineHint,
-                        VoiceMode.cloud => l10n.voiceModeCloudHint,
-                      },
-                      trailing: SizedBox.square(
-                        dimension: 32,
-                        child: Icon(selected == mode ? AppIcons.radioOn : AppIcons.radioOff, size: 24),
-                      ),
-                      onTap: () => unawaited(ref.read(voiceSettingsProvider.notifier).setMode(mode)),
-                    ),
+            for (final mode in VoiceMode.values)
+              Semantics(
+                checked: selected == mode,
+                inMutuallyExclusiveGroup: true,
+                child: SettingsTile(
+                  key: ValueKey('voice-mode-${mode.name}'),
+                  title: voiceModeLabel(l10n, mode),
+                  subtitle: switch (mode) {
+                    VoiceMode.auto => l10n.voiceModeAutoHint,
+                    VoiceMode.deepseek => l10n.voiceModeDeepseekHint,
+                    VoiceMode.system => l10n.voiceModeSystemHint,
+                    VoiceMode.engine => l10n.voiceModeEngineHint,
+                    VoiceMode.cloud => l10n.voiceModeCloudHint,
+                  },
+                  trailing: SizedBox.square(
+                    dimension: 32,
+                    child: Icon(selected == mode ? AppIcons.radioOn : AppIcons.radioOff, size: 24),
                   ),
+                  onTap: () => unawaited(ref.read(voiceSettingsProvider.notifier).setMode(mode)),
+                ),
+              ),
           ],
         ),
-        if (!wordsForIos && selected == VoiceMode.cloud) const _CloudAsrForm(),
-        if (!harmonyLocal && !wordsForIos)
-          SettingsSection(
-            title: l10n.voiceModelSection,
-            footer: Text(l10n.voiceModelFooter),
-            children: const [VoiceModelCard()],
-          ),
-        if (!wordsForIos)
-          SettingsSection(
-            title: l10n.speechLiveSection,
-            footer: Text(ohos ? l10n.speechLiveSystemFooter : l10n.speechLiveFooter),
-            // HarmonyOS captions use its own recognizer: nothing to download.
-            children: [ohos ? const SystemAsrCard() : const StreamingAsrModelCard()],
-          ),
+        if (selected == VoiceMode.cloud) const _CloudAsrForm(),
+        SettingsSection(
+          title: l10n.voiceModelSection,
+          footer: Text(l10n.voiceModelFooter),
+          children: const [VoiceModelCard()],
+        ),
+        SettingsSection(
+          title: l10n.speechLiveSection,
+          footer: Text(l10n.speechLiveFooter),
+          children: const [StreamingAsrModelCard()],
+        ),
         SettingsSection(
           title: l10n.speechCallSection,
           footer: Text(l10n.speechCallFooter),
@@ -356,6 +359,14 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
               subtitle: l10n.speechCallBargeInHint,
               value: call.bargeIn,
               onChanged: (on) => unawaited(calls.edit((saved) => saved.copyWith(bargeIn: on))),
+            ),
+            SettingsSegmentTile<CallBargeSensitivity>(
+              key: const ValueKey('speech-call-barge-sensitivity'),
+              title: l10n.speechCallBargeSensitivity,
+              subtitle: l10n.speechCallBargeSensitivityHint,
+              segments: callBargeSegments(l10n),
+              selected: call.sensitivity,
+              onChanged: (level) => unawaited(calls.edit((saved) => saved.copyWith(sensitivity: level))),
             ),
             SettingsSegmentTile<CallPause>(
               key: const ValueKey('speech-call-pause'),
@@ -387,6 +398,97 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
               onChanged: (on) => unawaited(calls.edit((saved) => saved.copyWith(cue: on))),
             ),
           ],
+        ),
+        _VoiceprintSection(call: call, calls: calls),
+      ],
+    );
+  }
+}
+
+/// 只认这几个人的声音：总开关、白名单入口、外人能否插话、认得松紧。
+///
+/// 四行都放在一张卡里，是因为它们讲的是同一件事；总开关一关，下面三行一起
+/// 置灰而不是隐藏——藏起来用户就不知道这功能存在了。
+class _VoiceprintSection extends ConsumerWidget {
+  const _VoiceprintSection({required this.call, required this.calls});
+
+  final CallSettings call;
+  final CallSettingsController calls;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
+    final profiles = ref.watch(voiceprintProfilesProvider).value ?? const <VoiceProfile>[];
+    final on = call.voiceprint;
+    final support = ref.watch(voiceprintSupportProvider);
+    // 空名单时开启开关没有意义：判定需要比对对象。界面上仍允许打开，
+    // 但入口行会跳成「还没录过」引导去录第一个。
+    final empty = profiles.isEmpty;
+    // 本机不支持时开关置灰并说明原因，不让人白开一场。
+    final unsupported = support.hasValue && support.value == false;
+
+    return SettingsSection(
+      title: l10n.speechVoiceprintSection,
+      footer: Text(l10n.speechVoiceprintFooter),
+      children: [
+        SettingsSwitchTile(
+          key: const ValueKey('speech-voiceprint'),
+          title: l10n.speechVoiceprintSwitch,
+          subtitle: unsupported ? l10n.speechVoiceprintUnsupported : l10n.speechVoiceprintSwitchHint,
+          value: on && !unsupported,
+          onChanged: unsupported
+              ? null
+              : (next) => unawaited(calls.edit((saved) => saved.copyWith(voiceprint: next))),
+        ),
+        SettingsTile(
+          key: const ValueKey('speech-voiceprint-profiles'),
+          title: l10n.speechVoiceprintProfiles,
+          subtitle: on ? null : l10n.speechVoiceprintOffHint,
+          value: Text(
+            empty ? l10n.speechVoiceprintEmpty : l10n.speechVoiceprintCount(profiles.length),
+            style: empty && on
+                ? TextStyle(color: Theme.of(context).colorScheme.primary)
+                : null,
+          ),
+          // 关着时不可点：流程线性一点——先开开关，再录声音。
+          onTap: on
+              ? () => unawaited(Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const VoiceprintListPage()),
+                  ))
+              : null,
+        ),
+        SettingsSwitchTile(
+          key: const ValueKey('speech-voiceprint-others'),
+          title: l10n.speechVoiceprintOthers,
+          subtitle: l10n.speechVoiceprintOthersHint2,
+          value: call.voiceprintOthers,
+          onChanged: on
+              ? (next) => unawaited(calls.edit((saved) => saved.copyWith(voiceprintOthers: next)))
+              : null,
+        ),
+        // 唤醒是常开的被动监听，判定次数远多于通话，所以单独一个开关，默认关。
+        SettingsSwitchTile(
+          key: const ValueKey('speech-voiceprint-wake'),
+          title: l10n.speechVoiceprintWake,
+          subtitle: l10n.speechVoiceprintWakeHint,
+          value: call.voiceprintWake,
+          onChanged: on
+              ? (next) => unawaited(calls.edit((saved) => saved.copyWith(voiceprintWake: next)))
+              : null,
+        ),
+        SettingsSegmentTile<VoiceprintLevel>(
+          key: const ValueKey('speech-voiceprint-level'),
+          title: l10n.speechVoiceprintLevel,
+          subtitle: l10n.speechVoiceprintLevelHint,
+          segments: [
+            PillSegment(VoiceprintLevel.loose, l10n.speechVoiceprintLoose),
+            PillSegment(VoiceprintLevel.normal, l10n.speechVoiceprintNormal),
+            PillSegment(VoiceprintLevel.strict, l10n.speechVoiceprintStrict),
+          ],
+          selected: call.voiceprintLevel,
+          onChanged: on
+              ? (level) => unawaited(calls.edit((saved) => saved.copyWith(voiceprintLevel: level)))
+              : null,
         ),
       ],
     );
@@ -681,73 +783,6 @@ class VoiceModelCard extends ConsumerWidget {
 }
 
 /// The streaming recognizer for live captions: download (about 198 MB), progress, delete.
-/// HarmonyOS's own recognizer for live captions: what its probe says now, and a
-/// retry when it was busy or failed. It never downloads or deletes anything.
-class SystemAsrCard extends ConsumerWidget {
-  const SystemAsrCard({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final l10n = context.l10n;
-    final theme = Theme.of(context);
-    final colors = DshColors.of(context);
-    final probe = ref.watch(ohosStreamingAsrReadyProvider);
-    final (status, statusColor, note) = switch (probe) {
-      AsyncData(value: SystemAsrReadiness.ready) => (
-        l10n.voiceModelReady,
-        colors.success,
-        l10n.speechLiveSystemReadyNote,
-      ),
-      AsyncData(value: SystemAsrReadiness.busy) => (
-        l10n.speechLiveSystemBusy,
-        theme.colorScheme.onSurfaceVariant,
-        l10n.speechLiveSystemBusyNote,
-      ),
-      AsyncError(:final error) => (l10n.voiceModelFailed, colors.danger, l10n.speechLiveSystemFailedNote('$error')),
-      _ => ('', colors.textTertiary, null),
-    };
-    final retry = probe is AsyncError || probe.value == SystemAsrReadiness.busy;
-    return Padding(
-      key: const ValueKey('live-system-card'),
-      padding: VoiceModelCard.padding,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Flexible(child: Text(l10n.speechLiveSystemName, style: settingsTitleStyle(context))),
-              const SizedBox(width: 12),
-              Flexible(
-                child: Text(
-                  status,
-                  textAlign: TextAlign.end,
-                  style: theme.textTheme.bodyMedium?.copyWith(color: statusColor),
-                ),
-              ),
-            ],
-          ),
-          if (note != null) ...[
-            const SizedBox(height: 6),
-            Text(note, style: theme.textTheme.bodySmall?.copyWith(color: colors.textTertiary)),
-          ],
-          if (retry) ...[
-            const SizedBox(height: 14),
-            OutlinedButton(
-              key: const ValueKey('live-system-retry'),
-              onPressed: () => ref.invalidate(ohosStreamingAsrReadyProvider),
-              child: Text(l10n.commonRetry),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 class StreamingAsrModelCard extends ConsumerWidget {
   const StreamingAsrModelCard({super.key});
 

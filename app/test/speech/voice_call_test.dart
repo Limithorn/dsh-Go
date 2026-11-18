@@ -19,6 +19,8 @@ class _Rig {
     Duration cueAfter = const Duration(milliseconds: 40),
     // 快: the timings these tests were written for.
     CallPause pause = CallPause.quick,
+    bool voiceprint = false,
+    bool voiceprintOthers = true,
   }) : audio = FakeAudio(start: start),
        cloud = cloud ?? FakeCloud() {
     call = VoiceCallController(
@@ -30,7 +32,15 @@ class _Rig {
         outs.add(out);
         return out;
       },
-      choices: () async => (bargeIn: bargeIn, speaker: true, spokenHint: '（语音通话）', pause: pause),
+      choices: () async => (
+        bargeIn: bargeIn,
+        speaker: true,
+        spokenHint: '（语音通话）',
+        pause: pause,
+        sensitivity: CallBargeSensitivity.normal,
+        voiceprint: voiceprint,
+        voiceprintOthers: voiceprintOthers,
+      ),
       cutNote: (heard) => '（被打断在：$heard）',
       thinkingCue: () async => cues++,
       confirmAfter: confirmAfter,
@@ -137,8 +147,12 @@ void main() {
     expect(rig.conversation.sent.last, '那上海呢');
   });
 
-  Future<_Rig> speaking({Duration confirmAfter = const Duration(milliseconds: 60)}) async {
-    final rig = _Rig(confirmAfter: confirmAfter);
+  Future<_Rig> speaking({
+    Duration confirmAfter = const Duration(milliseconds: 60),
+    bool voiceprint = false,
+    bool voiceprintOthers = true,
+  }) async {
+    final rig = _Rig(confirmAfter: confirmAfter, voiceprint: voiceprint, voiceprintOthers: voiceprintOthers);
     await rig.call.start();
     await rig.say();
     rig.conversation.reply('好的，我来详细说一说。');
@@ -494,5 +508,88 @@ void main() {
     rig.conversation.reply('好的。');
     expect(rig.outs, hasLength(1));
     rig.call.hangUp();
+  });
+
+  group('声纹：只认这几个人的声音', () {
+    test('关着的时候：超时照样打断，与以前一样', () async {
+      final rig = await speaking();
+      rig.audio.emit(const SpeechStart(over: true));
+      expect(rig.call.phase, CallPhase.speaking, reason: '她仍在说');
+      await Future<void>.delayed(const Duration(milliseconds: 140));
+      expect(rig.outs.single.stopped, isTrue,
+          reason: '声纹关着：没有 speechJudge，计时照常把她切断');
+      rig.call.hangUp();
+    });
+
+    test('自己人：speechJudge 说 you 之前不切断，说了之后按原逻辑切断', () async {
+      final rig = await speaking(voiceprint: true);
+      rig.audio.emit(const SpeechStart(over: true));
+      expect(rig.outs.single.ducks, [true], reason: '先降音');
+      await Future<void>.delayed(const Duration(milliseconds: 140));
+      expect(rig.outs.single.stopped, isFalse,
+          reason: '身份还没判出来，不能靠超时把她切断');
+
+      rig.audio.emit(const SpeechJudge(over: true, kind: VoiceprintKind.you, score: 0.9));
+      await Future<void>.delayed(const Duration(milliseconds: 140));
+      expect(rig.outs.single.stopped, isTrue, reason: '自己人开口，恢复原来的计时');
+      rig.call.hangUp();
+    });
+
+    test('外人且不许插话：一直不切断', () async {
+      final rig = await speaking(voiceprint: true, voiceprintOthers: false);
+      rig.audio.emit(const SpeechStart(over: true));
+      rig.audio.emit(const SpeechJudge(over: true, kind: VoiceprintKind.other, score: 0.1));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(rig.outs.single.stopped, isFalse, reason: '旁人说话不能打断她');
+      expect(rig.outs.single.ducks, [true, false], reason: '降了音就要恢复');
+      rig.call.hangUp();
+    });
+
+    test('外人但允许插话：不靠计时，说了实词才断', () async {
+      final rig = await speaking(voiceprint: true, voiceprintOthers: true);
+      rig.audio.emit(const SpeechStart(over: true));
+      rig.audio.emit(const SpeechJudge(over: true, kind: VoiceprintKind.other, score: 0.1));
+      await Future<void>.delayed(const Duration(milliseconds: 180));
+      expect(rig.outs.single.stopped, isFalse, reason: '外人不会靠超时打断');
+
+      rig.cloud.text = '我觉得这个不对';
+      rig.audio.emit(Utterance(_Rig.second, const Duration(milliseconds: 600)));
+      await pumpEventQueue();
+      expect(rig.outs.single.stopped, isTrue,
+          reason: '说了实词仍然能打断，只是慢一拍');
+      rig.call.hangUp();
+    });
+
+    test('外人说应声词：她继续，不打断', () async {
+      final rig = await speaking(voiceprint: true, voiceprintOthers: true);
+      rig.audio.emit(const SpeechStart(over: true));
+      rig.audio.emit(const SpeechJudge(over: true, kind: VoiceprintKind.other, score: 0.1));
+      rig.cloud.text = '嗯嗯，对';
+      rig.audio.emit(Utterance(_Rig.second, const Duration(milliseconds: 600)));
+      await pumpEventQueue();
+      expect(rig.outs.single.stopped, isFalse, reason: '应声词不算插话');
+      expect(rig.conversation.interrupts, 0);
+      rig.call.hangUp();
+    });
+
+    test('unknown：先不切断，兜底之后恢复音量而不是切她', () async {
+      final rig = await speaking(voiceprint: true);
+      rig.audio.emit(const SpeechStart(over: true));
+      rig.audio.emit(const SpeechJudge(over: true, kind: VoiceprintKind.unknown, score: 0.66));
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(rig.outs.single.stopped, isFalse, reason: '认不准就不切断');
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(rig.outs.single.stopped, isFalse, reason: '兜底也只是恢复音量，不切');
+      rig.call.hangUp();
+    });
+
+    test('她没在说话时来的判定，与插话无关', () async {
+      final rig = _Rig(voiceprint: true);
+      await rig.call.start();
+      rig.audio.emit(const SpeechJudge(over: false, kind: VoiceprintKind.other, score: 0.1));
+      await pumpEventQueue();
+      expect(rig.call.phase, CallPhase.listening, reason: '不在插话场景就该被忽略');
+      rig.call.hangUp();
+    });
   });
 }

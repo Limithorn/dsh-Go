@@ -36960,6 +36960,36 @@ abstract class L10n {
   /// **'AI 说话时你一开口，它先轻下来；「嗯」「对」它接着说，说别的它就停下听你'**
   String get speechCallBargeInHint;
 
+  /// No description provided for @speechCallBargeSensitivity.
+  ///
+  /// In zh, this message translates to:
+  /// **'插话灵敏度'**
+  String get speechCallBargeSensitivity;
+
+  /// No description provided for @speechCallBargeSensitivityHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'AI 说话时，多响才算你在插话。若它老被自己的声音打断，往右选'**
+  String get speechCallBargeSensitivityHint;
+
+  /// No description provided for @speechCallBargeSensitive.
+  ///
+  /// In zh, this message translates to:
+  /// **'灵敏'**
+  String get speechCallBargeSensitive;
+
+  /// No description provided for @speechCallBargeNormal.
+  ///
+  /// In zh, this message translates to:
+  /// **'标准'**
+  String get speechCallBargeNormal;
+
+  /// No description provided for @speechCallBargeGuarded.
+  ///
+  /// In zh, this message translates to:
+  /// **'防误触'**
+  String get speechCallBargeGuarded;
+
   /// No description provided for @speechCallSpoken.
   ///
   /// In zh, this message translates to:
@@ -37481,6 +37511,642 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'填中文，比如 你好肥鱼'**
   String get wakeWordHint;
+
+  /// No description provided for @wakeSensitivityTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'唤醒灵敏度'**
+  String get wakeSensitivityTitle;
+
+  /// No description provided for @wakeSensitivityHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'多像才算是叫它。叫不醒就调灵敏，老被误唤醒就调严格'**
+  String get wakeSensitivityHint;
+
+  /// No description provided for @wakeSensitivitySensitive.
+  ///
+  /// In zh, this message translates to:
+  /// **'灵敏'**
+  String get wakeSensitivitySensitive;
+
+  /// No description provided for @wakeSensitivityNormal.
+  ///
+  /// In zh, this message translates to:
+  /// **'标准'**
+  String get wakeSensitivityNormal;
+
+  /// No description provided for @wakeSensitivityStrict.
+  ///
+  /// In zh, this message translates to:
+  /// **'严格'**
+  String get wakeSensitivityStrict;
+
+  /// No description provided for @speechVoiceprintSection.
+  ///
+  /// In zh, this message translates to:
+  /// **'只认这几个人的声音'**
+  String get speechVoiceprintSection;
+
+  /// No description provided for @speechVoiceprintFooter.
+  ///
+  /// In zh, this message translates to:
+  /// **'声纹只存在这台手机上，不会上传。录过的人之间可以互相插话——认的是「是不是自己人」，不是「是谁」。'**
+  String get speechVoiceprintFooter;
+
+  /// No description provided for @speechVoiceprintSwitch.
+  ///
+  /// In zh, this message translates to:
+  /// **'只认这几个人的声音'**
+  String get speechVoiceprintSwitch;
+
+  /// No description provided for @speechVoiceprintSwitchHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'她说话时，只有录过的人开口才会打断；旁人说话不打断'**
+  String get speechVoiceprintSwitchHint;
+
+  /// No description provided for @speechVoiceprintProfiles.
+  ///
+  /// In zh, this message translates to:
+  /// **'已录入的声音'**
+  String get speechVoiceprintProfiles;
+
+  /// No description provided for @speechVoiceprintEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'还没录过'**
+  String get speechVoiceprintEmpty;
+
+  /// No description provided for @speechVoiceprintCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 人'**
+  String speechVoiceprintCount(int count);
+
+  /// No description provided for @speechVoiceprintOthers.
+  ///
+  /// In zh, this message translates to:
+  /// **'允许其他人插话'**
+  String get speechVoiceprintOthers;
+
+  /// No description provided for @speechVoiceprintOthersHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'他们说话也能打断，只是她反应会慢一点'**
+  String get speechVoiceprintOthersHint;
+
+  /// No description provided for @speechVoiceprintLevel.
+  ///
+  /// In zh, this message translates to:
+  /// **'识别灵敏度'**
+  String get speechVoiceprintLevel;
+
+  /// No description provided for @speechVoiceprintLevelHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'宽松更容易认出自己人，严格更不容易把旁人当成自己人'**
+  String get speechVoiceprintLevelHint;
+
+  /// No description provided for @speechVoiceprintLoose.
+  ///
+  /// In zh, this message translates to:
+  /// **'宽松'**
+  String get speechVoiceprintLoose;
+
+  /// No description provided for @speechVoiceprintNormal.
+  ///
+  /// In zh, this message translates to:
+  /// **'标准'**
+  String get speechVoiceprintNormal;
+
+  /// No description provided for @speechVoiceprintStrict.
+  ///
+  /// In zh, this message translates to:
+  /// **'严格'**
+  String get speechVoiceprintStrict;
+
+  /// No description provided for @speechVoiceprintOffHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开上面的开关后，才能录入声音'**
+  String get speechVoiceprintOffHint;
+
+  /// No description provided for @speechVoiceprintListTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'已录入的声音'**
+  String get speechVoiceprintListTitle;
+
+  /// No description provided for @speechVoiceprintAdd.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加一个声音'**
+  String get speechVoiceprintAdd;
+
+  /// No description provided for @speechVoiceprintFull.
+  ///
+  /// In zh, this message translates to:
+  /// **'最多 5 个'**
+  String get speechVoiceprintFull;
+
+  /// No description provided for @speechVoiceprintFullHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'删掉一个才能再录'**
+  String get speechVoiceprintFullHint;
+
+  /// No description provided for @speechVoiceprintRecordedAt.
+  ///
+  /// In zh, this message translates to:
+  /// **'{date} 录入'**
+  String speechVoiceprintRecordedAt(String date);
+
+  /// No description provided for @speechVoiceprintRename.
+  ///
+  /// In zh, this message translates to:
+  /// **'改个备注'**
+  String get speechVoiceprintRename;
+
+  /// No description provided for @speechVoiceprintDelete.
+  ///
+  /// In zh, this message translates to:
+  /// **'删掉这个声音'**
+  String get speechVoiceprintDelete;
+
+  /// No description provided for @speechVoiceprintDeleteConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'删掉后就认不出这位了。确定吗？'**
+  String get speechVoiceprintDeleteConfirm;
+
+  /// No description provided for @speechVoiceprintEnrollTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'录入声音'**
+  String get speechVoiceprintEnrollTitle;
+
+  /// No description provided for @speechVoiceprintStepOne.
+  ///
+  /// In zh, this message translates to:
+  /// **'正常音量说点什么'**
+  String get speechVoiceprintStepOne;
+
+  /// No description provided for @speechVoiceprintStepTwo.
+  ///
+  /// In zh, this message translates to:
+  /// **'稍微远一点再说'**
+  String get speechVoiceprintStepTwo;
+
+  /// No description provided for @speechVoiceprintStepThree.
+  ///
+  /// In zh, this message translates to:
+  /// **'带点背景音再说'**
+  String get speechVoiceprintStepThree;
+
+  /// No description provided for @speechVoiceprintStepHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'不用念稿，像平时聊天那样就好'**
+  String get speechVoiceprintStepHint;
+
+  /// No description provided for @speechVoiceprintListening.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在听…'**
+  String get speechVoiceprintListening;
+
+  /// No description provided for @speechVoiceprintTooQuiet.
+  ///
+  /// In zh, this message translates to:
+  /// **'太小声了，靠近一点'**
+  String get speechVoiceprintTooQuiet;
+
+  /// No description provided for @speechVoiceprintTooNoisy.
+  ///
+  /// In zh, this message translates to:
+  /// **'有点吵，换个安静些的地方'**
+  String get speechVoiceprintTooNoisy;
+
+  /// No description provided for @speechVoiceprintTooShort.
+  ///
+  /// In zh, this message translates to:
+  /// **'时长不够，再多说一会儿'**
+  String get speechVoiceprintTooShort;
+
+  /// No description provided for @speechVoiceprintGood.
+  ///
+  /// In zh, this message translates to:
+  /// **'刚好'**
+  String get speechVoiceprintGood;
+
+  /// No description provided for @speechVoiceprintNext.
+  ///
+  /// In zh, this message translates to:
+  /// **'下一步'**
+  String get speechVoiceprintNext;
+
+  /// No description provided for @speechVoiceprintRedo.
+  ///
+  /// In zh, this message translates to:
+  /// **'重录'**
+  String get speechVoiceprintRedo;
+
+  /// No description provided for @speechVoiceprintCancel.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消'**
+  String get speechVoiceprintCancel;
+
+  /// No description provided for @speechVoiceprintSaving.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在比对…'**
+  String get speechVoiceprintSaving;
+
+  /// No description provided for @speechVoiceprintSelfCheckFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'这段和前后差别太大，重录一次吧'**
+  String get speechVoiceprintSelfCheckFailed;
+
+  /// No description provided for @speechVoiceprintDuplicate.
+  ///
+  /// In zh, this message translates to:
+  /// **'这好像已经录过了'**
+  String get speechVoiceprintDuplicate;
+
+  /// No description provided for @speechVoiceprintDuplicateHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'和「{name}」很像。要覆盖那一条，还是取消？'**
+  String speechVoiceprintDuplicateHint(String name);
+
+  /// No description provided for @speechVoiceprintOverwrite.
+  ///
+  /// In zh, this message translates to:
+  /// **'覆盖'**
+  String get speechVoiceprintOverwrite;
+
+  /// No description provided for @speechVoiceprintUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'这台手机不支持声纹识别'**
+  String get speechVoiceprintUnsupported;
+
+  /// No description provided for @speechVoiceprintAside.
+  ///
+  /// In zh, this message translates to:
+  /// **'（旁边有人说话，她继续）'**
+  String get speechVoiceprintAside;
+
+  /// No description provided for @speechVoiceprintStart.
+  ///
+  /// In zh, this message translates to:
+  /// **'开始录音'**
+  String get speechVoiceprintStart;
+
+  /// No description provided for @speechVoiceprintChecking.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在检查本机支持…'**
+  String get speechVoiceprintChecking;
+
+  /// No description provided for @speechVoiceprintReady.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机支持'**
+  String get speechVoiceprintReady;
+
+  /// No description provided for @speechVoiceprintMeter.
+  ///
+  /// In zh, this message translates to:
+  /// **'实测：{ms} 秒 · 响度 {db} dB · 杂音 {noise}'**
+  String speechVoiceprintMeter(String ms, String db, String noise);
+
+  /// No description provided for @speechVoiceprintDiagnostics.
+  ///
+  /// In zh, this message translates to:
+  /// **'声纹诊断'**
+  String get speechVoiceprintDiagnostics;
+
+  /// No description provided for @speechVoiceprintDiagEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'还没有记录。打一通电话，说几句话，回来这里看。'**
+  String get speechVoiceprintDiagEmpty;
+
+  /// No description provided for @speechVoiceprintDiagYouMin.
+  ///
+  /// In zh, this message translates to:
+  /// **'自己人最低分 {score}'**
+  String speechVoiceprintDiagYouMin(String score);
+
+  /// No description provided for @speechVoiceprintDiagYouCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 次判成自己人'**
+  String speechVoiceprintDiagYouCount(int count);
+
+  /// No description provided for @speechVoiceprintDiagOtherMax.
+  ///
+  /// In zh, this message translates to:
+  /// **'旁人最高分 {score}'**
+  String speechVoiceprintDiagOtherMax(String score);
+
+  /// No description provided for @speechVoiceprintDiagOtherCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 次判成旁人'**
+  String speechVoiceprintDiagOtherCount(int count);
+
+  /// No description provided for @speechVoiceprintDiagGap.
+  ///
+  /// In zh, this message translates to:
+  /// **'两堆相隔 {gap}'**
+  String speechVoiceprintDiagGap(String gap);
+
+  /// No description provided for @speechVoiceprintDiagSeparated.
+  ///
+  /// In zh, this message translates to:
+  /// **'分得开：阈值可以画在中间'**
+  String get speechVoiceprintDiagSeparated;
+
+  /// No description provided for @speechVoiceprintDiagOverlap.
+  ///
+  /// In zh, this message translates to:
+  /// **'有重叠：这个档位分不开，换严格一档或重录'**
+  String get speechVoiceprintDiagOverlap;
+
+  /// No description provided for @speechVoiceprintDiagListTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'每一次判定'**
+  String get speechVoiceprintDiagListTitle;
+
+  /// No description provided for @speechVoiceprintDiagYou.
+  ///
+  /// In zh, this message translates to:
+  /// **'自己人'**
+  String get speechVoiceprintDiagYou;
+
+  /// No description provided for @speechVoiceprintDiagOther.
+  ///
+  /// In zh, this message translates to:
+  /// **'旁人'**
+  String get speechVoiceprintDiagOther;
+
+  /// No description provided for @speechVoiceprintDiagUnknown.
+  ///
+  /// In zh, this message translates to:
+  /// **'认不准'**
+  String get speechVoiceprintDiagUnknown;
+
+  /// No description provided for @speechVoiceprintDiagOver.
+  ///
+  /// In zh, this message translates to:
+  /// **'插话时'**
+  String get speechVoiceprintDiagOver;
+
+  /// No description provided for @speechVoiceprintDiagClear.
+  ///
+  /// In zh, this message translates to:
+  /// **'清空记录'**
+  String get speechVoiceprintDiagClear;
+
+  /// No description provided for @speechVoiceprintDiagSelfCheck.
+  ///
+  /// In zh, this message translates to:
+  /// **'用你自己的录音自检'**
+  String get speechVoiceprintDiagSelfCheck;
+
+  /// No description provided for @speechVoiceprintDiagSelfCheckHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'拿录入时的音频再比一次，看看你的声音能打多少分。这是阈值的下限参考。'**
+  String get speechVoiceprintDiagSelfCheckHint;
+
+  /// No description provided for @speechVoiceprintDiagSelfCheckRun.
+  ///
+  /// In zh, this message translates to:
+  /// **'开始自检'**
+  String get speechVoiceprintDiagSelfCheckRun;
+
+  /// No description provided for @speechVoiceprintDiagSelfCheckRunning.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在比对…'**
+  String get speechVoiceprintDiagSelfCheckRunning;
+
+  /// No description provided for @speechVoiceprintDiagSelfAvg.
+  ///
+  /// In zh, this message translates to:
+  /// **'你的声音平均 {score}'**
+  String speechVoiceprintDiagSelfAvg(String score);
+
+  /// No description provided for @speechVoiceprintDiagSelfMin.
+  ///
+  /// In zh, this message translates to:
+  /// **'{score}'**
+  String speechVoiceprintDiagSelfMin(String score);
+
+  /// No description provided for @speechVoiceprintDiagSelfAdvice.
+  ///
+  /// In zh, this message translates to:
+  /// **'阈值应低于这个数，否则你会被当成旁人'**
+  String get speechVoiceprintDiagSelfAdvice;
+
+  /// No description provided for @speechVoiceprintDiagThreshold.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前判自己人的线是 {accept}，判旁人的线是 {reject}'**
+  String speechVoiceprintDiagThreshold(String accept, String reject);
+
+  /// No description provided for @speechVoiceprintDiagNoProfile.
+  ///
+  /// In zh, this message translates to:
+  /// **'先录一条声音再自检'**
+  String get speechVoiceprintDiagNoProfile;
+
+  /// No description provided for @speechVoiceprintDiagWhat.
+  ///
+  /// In zh, this message translates to:
+  /// **'这些分数是每次开口时，你的声音和已录音声纹的相似度。'**
+  String get speechVoiceprintDiagWhat;
+
+  /// No description provided for @speechVoiceprintDiagCompare.
+  ///
+  /// In zh, this message translates to:
+  /// **'比对样本'**
+  String get speechVoiceprintDiagCompare;
+
+  /// No description provided for @speechVoiceprintDiagCompareHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'录一段你自己的、一段旁人的，直接看两者各得多少分。不用打电话，也不用等她说话。'**
+  String get speechVoiceprintDiagCompareHint;
+
+  /// No description provided for @speechVoiceprintDiagOwn.
+  ///
+  /// In zh, this message translates to:
+  /// **'我的声音'**
+  String get speechVoiceprintDiagOwn;
+
+  /// No description provided for @speechVoiceprintDiagOther2.
+  ///
+  /// In zh, this message translates to:
+  /// **'旁人的声音'**
+  String get speechVoiceprintDiagOther2;
+
+  /// No description provided for @speechVoiceprintDiagRecordOwn.
+  ///
+  /// In zh, this message translates to:
+  /// **'录一段我的'**
+  String get speechVoiceprintDiagRecordOwn;
+
+  /// No description provided for @speechVoiceprintDiagRecordOther.
+  ///
+  /// In zh, this message translates to:
+  /// **'录一段旁人的'**
+  String get speechVoiceprintDiagRecordOther;
+
+  /// No description provided for @speechVoiceprintDiagRecording.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音中…请说话'**
+  String get speechVoiceprintDiagRecording;
+
+  /// No description provided for @speechVoiceprintDiagNeedProfile.
+  ///
+  /// In zh, this message translates to:
+  /// **'先录一条声纹，再来试'**
+  String get speechVoiceprintDiagNeedProfile;
+
+  /// No description provided for @speechVoiceprintDiagOwnScore.
+  ///
+  /// In zh, this message translates to:
+  /// **'你的声音：{score}'**
+  String speechVoiceprintDiagOwnScore(String score);
+
+  /// No description provided for @speechVoiceprintDiagOtherScore.
+  ///
+  /// In zh, this message translates to:
+  /// **'旁人声音：{score}'**
+  String speechVoiceprintDiagOtherScore(String score);
+
+  /// No description provided for @speechVoiceprintDiagAdviceOk.
+  ///
+  /// In zh, this message translates to:
+  /// **'分得开。阈值放在 {low} 到 {high} 之间都行。'**
+  String speechVoiceprintDiagAdviceOk(String low, String high);
+
+  /// No description provided for @speechVoiceprintDiagAdviceTight.
+  ///
+  /// In zh, this message translates to:
+  /// **'分得不太开（只差 {gap}），建议选严格一档，或重录声纹。'**
+  String speechVoiceprintDiagAdviceTight(String gap);
+
+  /// No description provided for @speechVoiceprintDiagAdviceBad.
+  ///
+  /// In zh, this message translates to:
+  /// **'分不开：旁人的分比你还高。这个档位不能用，换严格一档并重录。'**
+  String get speechVoiceprintDiagAdviceBad;
+
+  /// No description provided for @speechVoiceprintDiagRerecord.
+  ///
+  /// In zh, this message translates to:
+  /// **'重录'**
+  String get speechVoiceprintDiagRerecord;
+
+  /// No description provided for @speechVoiceprintDiagTry.
+  ///
+  /// In zh, this message translates to:
+  /// **'录一句试试'**
+  String get speechVoiceprintDiagTry;
+
+  /// No description provided for @speechVoiceprintDiagTryHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'点一下，说一句话，立刻告诉你这句被判成什么、多少分。不用打电话。'**
+  String get speechVoiceprintDiagTryHint;
+
+  /// No description provided for @speechVoiceprintDiagTryRecording.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音中…请说话'**
+  String get speechVoiceprintDiagTryRecording;
+
+  /// No description provided for @speechVoiceprintDiagTryResult.
+  ///
+  /// In zh, this message translates to:
+  /// **'这句是 {verdict}'**
+  String speechVoiceprintDiagTryResult(String verdict);
+
+  /// No description provided for @speechVoiceprintDiagTryScore.
+  ///
+  /// In zh, this message translates to:
+  /// **'相似度 {score}（判自己人的线 {accept}，判旁人的线 {reject}）'**
+  String speechVoiceprintDiagTryScore(String score, String accept, String reject);
+
+  /// No description provided for @speechVoiceprintDiagTryShort.
+  ///
+  /// In zh, this message translates to:
+  /// **'说得太短，再来一次'**
+  String get speechVoiceprintDiagTryShort;
+
+  /// No description provided for @speechVoiceprintDiagTryFail.
+  ///
+  /// In zh, this message translates to:
+  /// **'这段算不出声纹，重说一次'**
+  String get speechVoiceprintDiagTryFail;
+
+  /// No description provided for @speechVoiceprintWake.
+  ///
+  /// In zh, this message translates to:
+  /// **'唤醒时也认声音'**
+  String get speechVoiceprintWake;
+
+  /// No description provided for @speechVoiceprintWakeHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'叫名字的人不在上面这些声音里，就不答应'**
+  String get speechVoiceprintWakeHint;
+
+  /// No description provided for @speechVoiceprintOthersHint2.
+  ///
+  /// In zh, this message translates to:
+  /// **'旁人说话也能打断，只是她会慢一拍；关掉就只有录过的人能打断'**
+  String get speechVoiceprintOthersHint2;
+
+  /// No description provided for @speechCallBargeResistant.
+  ///
+  /// In zh, this message translates to:
+  /// **'更防误触'**
+  String get speechCallBargeResistant;
+
+  /// No description provided for @speechCallBargeStubborn.
+  ///
+  /// In zh, this message translates to:
+  /// **'最防误触'**
+  String get speechCallBargeStubborn;
+
+  /// No description provided for @speechVoiceprintRetryThis.
+  ///
+  /// In zh, this message translates to:
+  /// **'重录这一段'**
+  String get speechVoiceprintRetryThis;
+
+  /// No description provided for @speechVoiceprintRetryThisHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'已经收下 {count} 段，还差 {left} 段'**
+  String speechVoiceprintRetryThisHint(int count, int left);
+
+  /// No description provided for @speechVoiceprintSelfCheckFailedNum.
+  ///
+  /// In zh, this message translates to:
+  /// **'三段之间最不像的一条只有 {score}，低于 {need}。把最不像那遍重说一次'**
+  String speechVoiceprintSelfCheckFailedNum(String score, String need);
 
   /// The star prompt's first line. hours is the whole hours of use so far, rounded down; 0 is half an hour (the first ask comes after 30 minutes). The word joiner keeps the ~ on the line of the word before it.
   ///

@@ -21,7 +21,14 @@ Future<bool> pictureInPictureAvailable() async {
 }
 
 /// 进入画中画。返回 false 表示系统不允许或没有该能力。
-Future<bool> enterPictureInPicture() async {
+///
+/// [dismiss] 在真的进小窗之前调用一次：小窗画的是 [CallCardLayer] 这一层，
+/// 而底部弹层（背景设置那种）挂在 MaterialApp 的 Navigator 里，比这一层还高。
+/// 不收掉它，小窗里就把它一起画了进去——"小窗怎么是设置页"就是这么来的。
+Future<bool> enterPictureInPicture({Future<void> Function()? dismiss}) async {
+  if (dismiss != null) {
+    await dismiss();
+  }
   try {
     return await _channel.invokeMethod<bool>('enterPictureInPicture') ?? false;
   } on PlatformException {

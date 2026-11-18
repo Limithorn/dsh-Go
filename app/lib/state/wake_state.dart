@@ -5,12 +5,17 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../diagnostics/diagnostics_channel.dart';
+import '../nativemedia/speaker_gate_bridge.dart';
 import '../speech/wake_word.dart';
+import '../speech/speech_settings.dart';
+import '../speech/voiceprint_store.dart';
 import '../speech/wake_words.dart';
 import '../ui/speech/voice_call_page.dart';
 import 'app_navigation.dart';
 import 'sessions_state.dart';
 import 'wake_binding.dart';
+import 'wake_sensitivity.dart';
 
 /// 唤醒词的状态：开着没有、模型好没好、刚才被叫了几次。
 class WakeState {
@@ -97,7 +102,8 @@ class WakeController extends Notifier<WakeState> {
     final dir = await prepareWakeModel(await _modelDir());
     // 先把人写的那个词写成模型能读的词表（设置里改过就是新的）。
     await WakeWords.syncTo(dir);
-    final loaded = await _engine.load(dir);
+    final level = await WakeSensitivityStore.read();
+    final loaded = await _engine.load(dir, threshold: level.threshold);
     if (!loaded) {
       state = state.copyWith(problem: 'model_unavailable');
       return false;
@@ -130,6 +136,14 @@ class WakeController extends Notifier<WakeState> {
     return '${base.path}/wake';
   }
 
+  /// 最近这段音频，唤醒命中时拿它验"是谁叫的"。
+  ///
+  /// 唤醒词本身已经把范围缩到"刚叫了名字的人"，这段缓冲正好是那个人的声音，
+  /// 不必再等他开口。留 1.5 秒：够 CAM++ 算，也够覆盖一个词的时长。
+  final _recent = <int>[];
+
+  static const _recentLimit = 24000; // 1.5s @ 16k
+
   Future<void> _onCall(MethodCall call) async {
     switch (call.method) {
       case 'chunk':
@@ -140,18 +154,53 @@ class WakeController extends Notifier<WakeState> {
         for (var i = 0; i < samples.length; i++) {
           samples[i] = data.getInt16(i * 2, Endian.little);
         }
+        // 维护"最近 1.5 秒"，唤醒命中时用它判是谁。
+        _recent.addAll(samples);
+        if (_recent.length > _recentLimit) {
+          _recent.removeRange(0, _recent.length - _recentLimit);
+        }
         final hit = _engine.accept(samples);
         if (hit != null && hit.isNotEmpty) {
-          unawaited(_wake(hit));
+          // 先把这段抄下来：_wake 会把引擎重开，缓冲随即被清。
+          final heard = Float32List.fromList([
+            for (final v in _recent) v / 32768.0,
+          ]);
+          unawaited(_wake(hit, heard));
         }
       case 'error':
         state = state.copyWith(listening: false, problem: call.arguments as String?);
     }
   }
 
+  /// 叫名字的这个人，是录过的其中之一吗。
+  ///
+  /// 三种情况都算"可以答应"，因为这时不该多管闲事：
+  ///  - 唤醒声纹开关关着（默认）；
+  ///  - 一条声纹都没录（没人可认）；
+  ///  - 算出不出来（太短、算失败）——宁可答应，也不要让开关变成"叫不应"。
+  ///
+  /// 只有"明确判成旁人"才拦下。
+  Future<bool> _isKnownVoice(Float32List heard) async {
+    final settings = ref.read(callSettingsProvider);
+    if (!settings.voiceprint || !settings.voiceprintWake) return true;
+    final profiles = ref.read(voiceprintProfilesProvider).value ?? const <VoiceProfile>[];
+    if (profiles.isEmpty) return true;
+    if (heard.length < 8000) return true;
+    // 判定交给原生：模型和模板都在那边，阈值也按唤醒那道闸算。
+    // 这里自己再算一遍只会多一套可能不一致的逻辑。
+    final ok = await VoiceprintChannel().isKnownVoice(Float32List.fromList(heard));
+    unawaited(const DiagnosticsChannel().recordVoiceStage(ok ? 'wake_voice_ok' : 'wake_voice_other'));
+    return ok;
+  }
+
   /// 被叫醒了：停一下麦克风（别把通话自己的声音再喂回来），把 App 请到前面，
   /// 推开通话页，然后接着听。
-  Future<void> _wake(String word) async {
+  Future<void> _wake(String word, Float32List heard) async {
+    // 认声音：只有录过的人叫名字才答应。开关关着时这一步整个跳过。
+    if (!await _isKnownVoice(heard)) {
+      // 词对了但人不对：当作没听见，麦克风不动，什么也不弹。
+      return;
+    }
     state = state.copyWith(hits: state.hits + 1);
     await _channel.invokeMethod<void>('stop');
     state = state.copyWith(listening: false);

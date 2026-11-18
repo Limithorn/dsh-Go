@@ -76,7 +76,15 @@ abstract class CallConversation {
 
 /// The person's choices for a call: speaking over her stops her; the
 /// loudspeaker or the earpiece; [spokenHint] goes before the first message.
-typedef CallChoices = ({bool bargeIn, bool speaker, String? spokenHint, CallPause pause});
+typedef CallChoices = ({
+  bool bargeIn,
+  bool speaker,
+  String? spokenHint,
+  CallPause pause,
+  CallBargeSensitivity sensitivity,
+  bool voiceprint,
+  bool voiceprintOthers,
+});
 
 /// One exchange of the call as it reads: what the person said, and her reply
 /// as far as it is known (all of it, or, [cut], as far as she got).
@@ -130,6 +138,10 @@ class VoiceCallController extends ChangeNotifier {
   final Future<CallChoices> Function() choices;
   bool _bargeIn = true;
   CallPause _pause = CallPause.normal;
+  CallBargeSensitivity _sensitivity = CallBargeSensitivity.normal;
+
+  /// 只认这几个人的声音。关着时下面三个字段都不参与判定，行为与以前逐字节一致。
+  bool _voiceprint = false;
 
   /// Put before the call's first message: asks for short spoken answers.
   String? _spokenHint;
@@ -150,10 +162,6 @@ class VoiceCallController extends ChangeNotifier {
   CallEnd? _ended;
   bool _muted = false;
   bool _speaker = true;
-  bool? _speakerPreference;
-  int _speakerRequest = 0;
-  Object? _speakerError;
-  Completer<void>? _initialSpeaker;
   double _micLevel = 0;
   double _voiceLevel = 0;
   String _heard = '';
@@ -179,6 +187,26 @@ class VoiceCallController extends ChangeNotifier {
   /// The person's words as the phone hears them while they speak (live captions,
   /// when the streaming recognizer is there); the message still goes from [recognizer].
   String _live = '';
+
+  /// 声纹开着时，这一次"插话"还在等身份。
+  ///
+  /// 有个真问题：`speechStart` 必须立刻发（duck 不能等），而声纹要 600ms 才判得出来。
+  /// 所以这段时间她先降音、**不启动 1.6s 计时**，等 `speechJudge` 到了再决定。
+  /// 声纹关着时这个字段恒为 false，一切照旧。
+  bool _awaitingJudge = false;
+
+  /// 这一次插话是被判成"外人"的（字幕提示用，也用于丢弃后续整句）。
+  bool _judgedOther = false;
+
+  /// 白名单外的人也能打断时，外人只是"慢一拍"：不启动计时，但保留整句识别，
+  /// 说了实词才断。开关关掉时，外人一律不打断。
+  bool _othersMayInterrupt = true;
+
+  /// 最近一次声纹判定，供调测页显示；没有时为 null。
+  ///
+  /// 只读给界面看，不参与任何判定逻辑。
+  ({VoiceprintKind kind, double score, String? matched, bool over})? get lastJudge => _lastJudge;
+  ({VoiceprintKind kind, double score, String? matched, bool over})? _lastJudge;
 
   /// What she has said of the reply so far, while her voice carries it.
   String _said = '';
@@ -260,7 +288,10 @@ class VoiceCallController extends ChangeNotifier {
     if (_disposed || _phase == CallPhase.ended) return;
     _bargeIn = chosen.bargeIn;
     _pause = chosen.pause;
-    if (!audio.requiresSpeakerAck) _speaker = chosen.speaker;
+    _sensitivity = chosen.sensitivity;
+    _voiceprint = chosen.voiceprint;
+    _othersMayInterrupt = chosen.voiceprintOthers;
+    _speaker = chosen.speaker;
     _spokenHint = chosen.spokenHint;
     notifyListeners();
     VoiceCloud? cloud;
@@ -288,28 +319,19 @@ class VoiceCallController extends ChangeNotifier {
       }
     }
     unawaited(const DiagnosticsChannel().recordVoiceStage('preparing'));
-    final started = audio.requiresSpeakerAck
-        ? await audio.startCallMuted(bargeIn: _bargeIn, pause: _pause, muted: _muted)
-        : await audio.startCall(bargeIn: _bargeIn, pause: _pause);
+    final started = await audio.startCall(
+      bargeIn: _bargeIn,
+      pause: _pause,
+      sensitivity: _sensitivity,
+    );
     if (_disposed || _phase == CallPhase.ended) {
-      // OH already retired this native generation in _end. Its old success
-      // acknowledgement must not issue a global stop after a newer call starts.
-      if (started == CallStart.ok && !audio.requiresSpeakerAck) unawaited(audio.stopCall());
+      if (started == CallStart.ok) unawaited(audio.stopCall());
       return;
     }
     switch (started) {
       case CallStart.ok:
         unawaited(const DiagnosticsChannel().recordVoiceStage('capture_started'));
-        if (audio.requiresSpeakerAck) {
-          // A newer control can supersede this request while the call starts.
-          // start() still waits for the current acknowledgement or call end.
-          final ready = _initialSpeaker = Completer<void>();
-          unawaited(_setSpeakerChecked(_speakerPreference ?? chosen.speaker));
-          await ready.future;
-          return;
-        } else {
-          _speaker = await audio.speaker(_speaker);
-        }
+        _speaker = await audio.speaker(_speaker);
         _set(CallPhase.listening);
       case CallStart.permission:
         _end(CallEnd.permission);
@@ -343,10 +365,19 @@ class VoiceCallController extends ChangeNotifier {
           _overFor
             ..reset()
             ..start();
+          // 声纹开着：先只降音，不启动计时。等 speechJudge 说了"是谁"再决定，
+          // 否则旁人随便一声就会在 1.6s 后把她切断——那正是要修的事。
+          if (_voiceprint) {
+            _awaitingJudge = true;
+            _judgedOther = false;
+            return;
+          }
           _overTimer = Timer(confirmAfter + _pause.longer, _cutIn);
           return;
         }
         _set(CallPhase.hearing);
+      case SpeechJudge(:final kind, :final score, :final matched):
+        _onJudge(kind, score, matched);
       case Utterance(:final wav, :final duration):
         unawaited(const DiagnosticsChannel().recordVoiceStage('utterance_ready'));
         // Finished before [confirmAfter]: the words decide.
@@ -365,6 +396,13 @@ class VoiceCallController extends ChangeNotifier {
   Future<void> _recognize(Uint8List wav, Duration duration) async {
     final cloud = _cloud;
     if (cloud == null || _muted) return;
+    // 声纹判成外人、又不许外人插话：这一段整个丢掉，识别都不必跑。
+    // 她已经在 _onJudge 里恢复音量继续了，这也是"只降音不切断"的落点。
+    if (_voiceprint && _judgedOther && !_othersMayInterrupt) {
+      _judgedOther = false;
+      unawaited(const DiagnosticsChannel().recordVoiceStage('voiceprint_dropped'));
+      return;
+    }
     // Said over her (she may already have stopped, if they talked on).
     final over = _over || _cutAt != null;
     // Too short to be words (a cough, a knock).
@@ -521,6 +559,8 @@ class VoiceCallController extends ChangeNotifier {
   void _carryOn() {
     _overTimer?.cancel();
     _over = false;
+    _awaitingJudge = false;
+    _judgedOther = false;
     final out = _out;
     if (out == null) {
       if (_phase != CallPhase.thinking) _set(CallPhase.listening);
@@ -528,6 +568,46 @@ class VoiceCallController extends ChangeNotifier {
     }
     out.duck(false);
     _set(CallPhase.speaking);
+  }
+
+  /// 声纹说了"刚开口的是谁"。
+  ///
+  /// 三态：
+  ///  - you：自己人，恢复原有逻辑（1.6s 计时 + 词表），与没开声纹时完全一样；
+  ///  - other + 允许外人插话：不启动计时，但保留整句识别——说了实词才断，
+  ///    "嗯""好的"这类不算。她反应慢一拍，但不会漏掉真正的插话；
+  ///  - other + 不允许：她继续，这段丢掉，不切断；
+  ///  - unknown：认不准就不动，等下一段判定（原生会继续判）。她维持降音。
+  void _onJudge(VoiceprintKind kind, double score, String? matched) {
+    if (!_voiceprint) return;
+    // 记下来给调测页看：不管后面走哪条分支，这一次的分数都值得留下。
+    _lastJudge = (kind: kind, score: score, matched: matched, over: _over);
+    notifyListeners();
+    // 不是"她正在说话时有人开口"的那种判定，与插话无关。
+    if (!_over || !_awaitingJudge) return;
+    _awaitingJudge = false;
+
+    switch (kind) {
+      case VoiceprintKind.you:
+        _judgedOther = false;
+        // 恢复原有节奏：确认时长 + 停顿档位，之后词表照旧。
+        _overTimer?.cancel();
+        _overTimer = Timer(confirmAfter + _pause.longer, _cutIn);
+      case VoiceprintKind.other:
+        _judgedOther = true;
+        if (_othersMayInterrupt) {
+          // 慢一拍：不启动计时，把决定权交给整句识别（_recognize 里的 _cutIn）。
+          _overTimer?.cancel();
+        } else {
+          // 完全不让插：她继续，这段话之后由 _recognize 丢弃。
+          _overTimer?.cancel();
+          _carryOn();
+        }
+      case VoiceprintKind.unknown:
+        // 认不准：维持降音，等下一段分。给一个兜底，避免一直降着不恢复。
+        _overTimer?.cancel();
+        _overTimer = Timer(confirmAfter + _pause.longer, _carryOn);
+    }
   }
 
   void _cue() {
@@ -608,40 +688,7 @@ class VoiceCallController extends ChangeNotifier {
 
   Future<void> setSpeaker(bool on) async {
     if (_phase == CallPhase.ended) return;
-    if (audio.requiresSpeakerAck) {
-      _speakerPreference = on;
-      return _setSpeakerChecked(on);
-    }
     _speaker = await audio.speaker(on);
-    notifyListeners();
-  }
-
-  Future<void> _setSpeakerChecked(bool on) async {
-    final request = ++_speakerRequest;
-    try {
-      final accepted = await audio.speaker(on);
-      if (_disposed || _phase == CallPhase.ended || request != _speakerRequest) return;
-      _speaker = accepted;
-      if (identical(_error, _speakerError)) _error = null;
-      _speakerError = null;
-      final ready = _initialSpeaker;
-      if (ready != null) {
-        _initialSpeaker = null;
-        _set(CallPhase.listening);
-        ready.complete();
-        return;
-      }
-    } catch (error) {
-      if (_disposed || _phase == CallPhase.ended || request != _speakerRequest) return;
-      // The existing call error state is safe for the UI's unawaited control.
-      // Keep the previous preference; the requested value was not accepted.
-      _error = _speakerError = error;
-      if (_initialSpeaker != null) {
-        // There is no acknowledged preference for this new call yet.
-        _end(CallEnd.failed);
-        return;
-      }
-    }
     notifyListeners();
   }
 
@@ -670,7 +717,6 @@ class VoiceCallController extends ChangeNotifier {
 
   void _end(CallEnd why) {
     if (_phase == CallPhase.ended) return;
-    if (audio.requiresSpeakerAck) _speakerRequest++;
     unawaited(const DiagnosticsChannel().recordVoiceStage('call_ended', code: why.index));
     _ended = why;
     _overTimer?.cancel();
@@ -680,9 +726,6 @@ class VoiceCallController extends ChangeNotifier {
     unawaited(_replySub?.cancel());
     unawaited(_audioSub?.cancel());
     _set(CallPhase.ended);
-    final ready = _initialSpeaker;
-    _initialSpeaker = null;
-    ready?.complete();
   }
 
   void _set(CallPhase phase) {

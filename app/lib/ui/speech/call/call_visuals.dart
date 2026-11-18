@@ -230,6 +230,7 @@ class CallField extends StatelessWidget {
     required this.palette,
     this.center = 0.4,
     this.strength = 1,
+    this.opaque = true,
   });
 
   final CallScene scene;
@@ -242,26 +243,35 @@ class CallField extends StatelessWidget {
   /// screen's width wants a little more to look the same at that size.
   final double strength;
 
+  /// Whether to lay the theme's field colour under the light.
+  ///
+  /// The page always does (it is the whole background). The small window
+  /// must not when a picture or her sits behind it — that solid rect would
+  /// paint the backdrop out of sight, leaving a flat swatch where the
+  /// person chose a photo.
+  final bool opaque;
+
   @override
   Widget build(BuildContext context) => RepaintBoundary(
     child: CustomPaint(
-      painter: _FieldPainter(scene, palette, center, strength),
+      painter: _FieldPainter(scene, palette, center, strength, opaque),
       child: const SizedBox.expand(),
     ),
   );
 }
 
 class _FieldPainter extends CustomPainter {
-  _FieldPainter(this.scene, this.palette, this.center, this.strength) : super(repaint: scene);
+  _FieldPainter(this.scene, this.palette, this.center, this.strength, this.opaque) : super(repaint: scene);
 
   final CallScene scene;
   final CallPalette palette;
   final double center;
   final double strength;
+  final bool opaque;
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawRect(Offset.zero & size, Paint()..color = palette.field);
+    if (opaque) canvas.drawRect(Offset.zero & size, Paint()..color = palette.field);
     final at = Offset(size.width / 2, size.height * center);
     final radius = size.width * (0.9 + scene.energy * 0.1 + (scene.breath - 0.5) * 0.04 * scene.depth);
     final tint = _drain(palette.main, scene.muted);
@@ -281,7 +291,7 @@ class _FieldPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_FieldPainter old) =>
-      old.center != center || old.palette != palette || old.strength != strength;
+      old.center != center || old.palette != palette || old.strength != strength || old.opaque != opaque;
 }
 
 /// The sphere of glass. Its resting diameter is [size] × 0.5; the rest is its glow.
@@ -342,26 +352,12 @@ class _GlassPainter extends CustomPainter {
 
     // Outside: a soft halo of the theme's colour. In a small window the same
     // blur would read as a solid disc, so the halo is spread wider there.
-    final halo = tones[2].withValues(alpha: ((light ? 0.28 : 0.18) + scene.glow * 0.45) * fade);
-    // A disc of r·1.02 blurred by σ = r·0.45, drawn as that blur's own falloff
-    // (full well inside, half at the edge, gone 2.5σ out): a mask blur that
-    // wide, every frame, is what made the call page stutter.
-    final outer = r * 2.145;
     canvas.drawCircle(
       center,
-      outer,
+      r * 1.02,
       Paint()
-        // 用渐变换掉 mask blur：同一帧里 σ 那么大的模糊是通话页卡顿的根源。
-        ..shader = RadialGradient(
-          colors: [
-            halo,
-            halo.withValues(alpha: halo.a * 0.85),
-            halo.withValues(alpha: halo.a * 0.5),
-            halo.withValues(alpha: halo.a * 0.12),
-            halo.withValues(alpha: 0),
-          ],
-          stops: const [0, 0.266, 0.476, 0.727, 1],
-        ).createShader(Rect.fromCircle(center: center, radius: outer)),
+        ..color = tones[2].withValues(alpha: ((light ? 0.28 : 0.18) + scene.glow * 0.45) * fade * halo)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, r * (0.45 + (1 - halo).clamp(0.0, 1.0) * 1.1)),
     );
 
     canvas.save();
@@ -486,24 +482,15 @@ class _EdgePainter extends CustomPainter {
       colors: [...palette.tones, palette.tones.first],
       transform: GradientRotation(scene.flow * 0.5),
     ).createShader(Offset.zero & size);
-    final width = 10 + scene.energy * 6 + scene.accent * 5;
-    final alpha = strength.clamp(0.0, 1.0);
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..shader = shader;
-    // A 16 blur round the whole screen every frame cost too much: eight nested
-    // strokes instead, each 6 wider on either side and carrying the Gaussian's
-    // share between its edge and the next one's.
-    double falloff(double d) => math.exp(-d * d / (2 * 16 * 16));
-    final peak = alpha * math.min(1.0, width / 40);
-    for (var k = 0; k < 8; k++) {
-      canvas.drawRRect(
-        frame,
-        paint
-          ..strokeWidth = width + 12.0 * k
-          ..color = Colors.white.withValues(alpha: peak * (falloff(6.0 * k) - falloff(6.0 * k + 6))),
-      );
-    }
+    canvas.drawRRect(
+      frame,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 10 + scene.energy * 6 + scene.accent * 5
+        ..shader = shader
+        ..color = Colors.white.withValues(alpha: strength.clamp(0.0, 1.0))
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 16),
+    );
   }
 
   @override
@@ -522,17 +509,7 @@ class CallClock extends StatefulWidget {
 }
 
 class _CallClockState extends State<CallClock> with SingleTickerProviderStateMixin {
-  late final Ticker _ticker = createTicker(_tick);
-  double? _last;
-
-  void _tick(Duration elapsed) {
-    final now = elapsed.inMicroseconds / 1e6;
-    // At most 60 a second, as the voice ring keeps: a 120 Hz screen would
-    // otherwise repaint the whole page twice as often for no visible gain.
-    if (_last != null && now - _last! < 1 / 62) return;
-    _last = now;
-    widget.onTick(now);
-  }
+  late final Ticker _ticker = createTicker((elapsed) => widget.onTick(elapsed.inMicroseconds / 1e6));
 
   @override
   void initState() {

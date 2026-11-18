@@ -143,6 +143,11 @@ class CallSettings {
     this.cue = true,
     this.visual = CallVisual.glass,
     this.pause = CallPause.normal,
+    this.sensitivity = CallBargeSensitivity.normal,
+    this.voiceprint = false,
+    this.voiceprintOthers = true,
+    this.voiceprintLevel = VoiceprintLevel.normal,
+    this.voiceprintWake = false,
   });
 
   /// Speaking over her stops her (else what is said while she talks is ignored).
@@ -167,6 +172,27 @@ class CallSettings {
   /// How long a pause ends what the person says.
   final CallPause pause;
 
+  /// How easily a sound while she talks is taken as an interruption; 防误触
+  /// raises the bar so her own echo is less likely to stop her.
+  final CallBargeSensitivity sensitivity;
+
+  /// 只认这几个人的声音：播放期间旁人说话不打断播报。
+  final bool voiceprint;
+
+  /// 声纹开着时，白名单外的人能不能也打断（只是她反应会慢一拍）。
+  ///
+  /// 默认开：刚打开声纹时行为最接近以前，不会让人觉得"功能坏了"。
+  final bool voiceprintOthers;
+
+  /// 唤醒也认声音。
+  ///
+  /// 默认关：唤醒是常开的被动监听，判定次数远多于通话，误判的代价（没反应、
+  /// 或被旁人唤醒）比通话里大。唤醒词本身已经是一道门槛，声纹是第二道。
+  final bool voiceprintWake;
+
+  /// 认得松还是严。
+  final VoiceprintLevel voiceprintLevel;
+
   CallSettings copyWith({
     bool? bargeIn,
     bool? spoken,
@@ -176,6 +202,11 @@ class CallSettings {
     bool? cue,
     CallVisual? visual,
     CallPause? pause,
+    CallBargeSensitivity? sensitivity,
+    bool? voiceprint,
+    bool? voiceprintOthers,
+    bool? voiceprintWake,
+    VoiceprintLevel? voiceprintLevel,
   }) => CallSettings(
     bargeIn: bargeIn ?? this.bargeIn,
     spoken: spoken ?? this.spoken,
@@ -185,6 +216,11 @@ class CallSettings {
     cue: cue ?? this.cue,
     visual: visual ?? this.visual,
     pause: pause ?? this.pause,
+    sensitivity: sensitivity ?? this.sensitivity,
+    voiceprint: voiceprint ?? this.voiceprint,
+    voiceprintOthers: voiceprintOthers ?? this.voiceprintOthers,
+    voiceprintWake: voiceprintWake ?? this.voiceprintWake,
+    voiceprintLevel: voiceprintLevel ?? this.voiceprintLevel,
   );
 }
 
@@ -213,6 +249,14 @@ class CallSettingsController extends Notifier<CallSettings> {
         cue: json['cue'] != false,
         visual: CallVisual.values.asNameMap()[json['visual']] ?? CallVisual.glass,
         pause: CallPause.values.asNameMap()[json['pause']] ?? CallPause.normal,
+        sensitivity: CallBargeSensitivity.values.asNameMap()[json['sensitivity']] ?? CallBargeSensitivity.normal,
+        voiceprint: json['voiceprint'] == true,
+        voiceprintOthers: json['voiceprintOthers'] != false,
+        voiceprintWake: json['voiceprintWake'] == true,
+        voiceprintLevel: VoiceprintLevel.values.firstWhere(
+          (l) => l.wire == json['voiceprintLevel'],
+          orElse: () => VoiceprintLevel.normal,
+        ),
       );
     } on Object {
       // Defaults for this run.
@@ -253,6 +297,11 @@ class CallSettingsController extends Notifier<CallSettings> {
         'cue': next.cue,
         'visual': next.visual.name,
         'pause': next.pause.name,
+        'sensitivity': next.sensitivity.name,
+        'voiceprint': next.voiceprint,
+        'voiceprintOthers': next.voiceprintOthers,
+        'voiceprintWake': next.voiceprintWake,
+        'voiceprintLevel': next.voiceprintLevel.wire,
       }),
     );
   }

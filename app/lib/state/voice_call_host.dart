@@ -29,12 +29,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../companion/companion_voice.dart' show speechSpeakerProvider;
 import '../companion/companion_voice_source.dart';
 import '../l10n/l10n.dart';
+import '../nativemedia/speaker_gate_bridge.dart';
 import '../speech/call/thinking_cue.dart';
 import '../speech/call/voice_call.dart';
 import '../speech/deepseek_speech.dart';
 import '../speech/speech_audio.dart';
 import '../speech/speech_out.dart';
 import '../speech/speech_settings.dart';
+import '../speech/voiceprint_log.dart';
+import '../speech/voiceprint_store.dart';
 import '../speech/voice_cloud.dart';
 import '../state/account_state.dart';
 import '../state/app_notes.dart';
@@ -44,6 +47,7 @@ import '../state/picture_in_picture.dart';
 import '../state/voice_settings.dart';
 import '../state/voice_state.dart' show voiceBridgeProvider;
 import '../ui/chat/voice/voice_bridge.dart' show VoicePermission;
+import '../ui/speech/call/call_backdrop.dart' show callCardBackdrop;
 import '../ui/speech/voice_call_page.dart'
     show CollapsedCallCard, callPipView, callStatus, pushVoiceCallPage;
 
@@ -59,6 +63,25 @@ class VoiceCallHost extends ChangeNotifier {
   CallVoiceBook? _book;
   ProviderContainer? _container;
   List<ProviderSubscription> _subs = const [];
+
+  /// 上一次见到的判定，用来避免重复记录。
+  ({VoiceprintKind kind, double score, String? matched, bool over})? _lastJudge;
+
+  /// 把声纹设置与白名单交给原生。
+  ///
+  /// 三处会调它：通话开始前、设置改了、白名单改了。功能关着时 `enabled` 传 false，
+  /// 原生立刻回到直通——这也是"关闭时行为与今天一致"的落点。
+  static Future<void> _pushVoiceprint(ProviderContainer container) async {
+    final settings = container.read(callSettingsProvider);
+    final profiles = container.read(voiceprintProfilesProvider).value ?? const <VoiceProfile>[];
+    await VoiceprintChannel().configure(
+      enabled: settings.voiceprint,
+      allowOthers: settings.voiceprintOthers,
+      level: settings.voiceprintLevel.wire,
+      profiles: settings.voiceprint ? profiles : const [],
+      wake: settings.voiceprint && settings.voiceprintWake,
+    );
+  }
   String _title = '';
   bool _collapsed = false;
   bool _pageUp = false;
@@ -101,6 +124,21 @@ class VoiceCallHost extends ChangeNotifier {
     _phase = made.phase;
     _muted = made.muted;
     made.addListener(_onCall);
+    // 声纹判定单独听一头：它不改变通话相位，但调测页要看分数。
+    made.addListener(() {
+      final judge = made.lastJudge;
+      if (judge == null || judge == _lastJudge) return;
+      _lastJudge = judge;
+      container.read(voiceprintLogProvider.notifier).add(
+            JudgedSample(
+              kind: judge.kind,
+              score: judge.score,
+              at: DateTime.now(),
+              over: judge.over,
+              matched: judge.matched,
+            ),
+          );
+    });
     container.read(callSurfaceProvider.notifier).set(CallSurface.full);
     // The channel is watched for the whole call, not for a page: 收起 pops
     // the page, and the card still has to hear pictureInPictureChanged.
@@ -111,8 +149,17 @@ class VoiceCallHost extends ChangeNotifier {
       container.listen(voiceSettingsProvider, (_, _) => unawaited(made.refreshRecognizer())),
       container.listen(cloudAsrProvider, (_, _) => unawaited(made.refreshRecognizer())),
       container.listen(callSettingsProvider.select((s) => s.pause), (_, pause) => made.setPause(pause)),
+      // 声纹的开关、外人能不能插话、认得松紧：通话中改了要立刻生效，
+      // 不必等下一通电话。白名单本身也可能在通话中被改（另一个入口），一起听。
+      container.listen(
+        callSettingsProvider.select((s) => (s.voiceprint, s.voiceprintOthers, s.voiceprintLevel, s.voiceprintWake)),
+        (_, _) => unawaited(_pushVoiceprint(container)),
+      ),
+      container.listen(voiceprintProfilesProvider, (_, _) => unawaited(_pushVoiceprint(container))),
     ];
     notifyListeners();
+    // 通话开始前先把白名单交下去：原生那边开场就按新配置跑。
+    unawaited(_pushVoiceprint(container));
     unawaited(made.start());
     _pageUp = true;
     try {
@@ -129,6 +176,12 @@ class VoiceCallHost extends ChangeNotifier {
     _collapsed = true;
     _container?.read(callSurfaceProvider.notifier).set(CallSurface.expanded);
     notifyListeners();
+    // 收起的动作可能接着进小窗（返回键那条路）：先把挂在这页上面的弹层
+    // 收掉，别让它跟着被画进小窗里。
+    final route = ModalRoute.of(pageContext);
+    if (route != null && !route.isCurrent) {
+      Navigator.of(pageContext).popUntil((r) => identical(r, route));
+    }
     Navigator.of(pageContext).pop();
   }
 
@@ -277,6 +330,9 @@ VoiceCallController makeChatCallController(
         speaker: saved.speaker,
         spokenHint: saved.spoken ? appNote(appL10n.speechCallHint) : null,
         pause: saved.pause,
+        sensitivity: saved.sensitivity,
+        voiceprint: saved.voiceprint,
+        voiceprintOthers: saved.voiceprintOthers,
       );
     },
     permission: () async => await bridge.requestPermission() == VoicePermission.granted,
@@ -469,6 +525,21 @@ class _CallCardLayerState extends State<CallCardLayer> with SingleTickerProvider
     final call = _host.call;
     // 没有活通话就绝不能进小窗：哪怕 PopScope 因为状态残留误拦了一次返回。
     if (call == null || call.phase == CallPhase.ended) return;
+    // 挂着的弹层（背景设置那种）在 root Navigator 上，比小窗那层还高：
+    // 不收掉它，小窗里就会跟它一起被画出来。返回键这条路也得收。
+    final root = Navigator.of(context, rootNavigator: true);
+    if (root.canPop()) {
+      final page = ModalRoute.of(context);
+      var closed = false;
+      if (page != null) {
+        root.popUntil((r) {
+          if (identical(r, page)) return true;
+          closed = true;
+          return false;
+        });
+      }
+      if (closed) await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
     final entered = await enterPictureInPicture();
     if (entered || !context.mounted) return;
     if (_host.collapsed && !_host.pageUp) await _host.expand(context);
@@ -499,14 +570,33 @@ class _CallCardLayerState extends State<CallCardLayer> with SingleTickerProvider
               Offstage(offstage: small, child: widget.child),
               if (small)
                 Positioned.fill(
-                  child: callPipView(
-                    l10n: context.l10n,
-                    theme: Theme.of(context),
-                    call: call,
-                    // 和整页同一个视觉设置：用户选了声波环，小窗也别变成玻璃球。
-                    visual: ProviderScope.containerOf(context, listen: false)
-                        .read(callSettingsProvider)
-                        .visual,
+                  // Consumer + watch：底片和视觉都是设置项，进小窗前改过，
+                  // 小窗也得是新的。
+                  child: Consumer(
+                    builder: (_, ref, _) {
+                      final settings = ref.watch(callSettingsProvider);
+                      final theme = Theme.of(context);
+                      final picture = settings.backdrop == CallBackdrop.image && settings.image.isNotEmpty;
+                      final her = settings.backdrop == CallBackdrop.companion;
+                      // 只要有底片就按深色走：海是 #10265A→#02050D 那片深蓝，
+                      // 图片和她更不用说。只有完全没有底片（纯色场）时才跟主题。
+                      final hasBackdrop = settings.backdrop == CallBackdrop.sea || picture || her;
+                      return callPipView(
+                        l10n: context.l10n,
+                        theme: theme,
+                        call: call,
+                        // 和整页同一个视觉设置：光球 / 光环 / 细线，一一对上。
+                        visual: settings.visual,
+                        // 和通话页同一张底，铺在光球下面。
+                        backdrop: callCardBackdrop(
+                          backdrop: settings.backdrop,
+                          image: settings.image,
+                          her: her,
+                        ),
+                        // 有底片的画面一律浅色字，否则深蓝底上的深色状态字看不见。
+                        dark: theme.brightness == Brightness.dark || hasBackdrop,
+                      );
+                    },
                   ),
                 )
               else if (collapsed && call != null)
@@ -520,6 +610,8 @@ class _CallCardLayerState extends State<CallCardLayer> with SingleTickerProvider
                     bottom: 20 - offset.dy,
                     child: child!,
                   ),
+                  // 卡片是纯色白卡（和以前一样），不吃底片；外面这层 child
+                  // 是缓存的，拖动时只重排位置。
                   child: RepaintBoundary(child: _card(context, call)),
                 )
               else

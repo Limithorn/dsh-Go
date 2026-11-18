@@ -20,9 +20,16 @@ class WakeWordEngine {
 
   bool get ready => _spotter != null;
 
-  /// 载入模型。模型文件由 [prepareWakeModel] 放到本地后传进来。
-  Future<bool> load(String dir) async {
-    if (_spotter != null || _loading) return _spotter != null;
+  /// 上一次载入用的门槛；换档位时靠它判断要不要重建 spotter。
+  double? _threshold;
+
+  /// 载入模型。模型文件由 [prepareWakeModel] 放到本地后传进来；
+  /// [threshold] 是判定命中的分数门槛，越高越难被叫醒。
+  Future<bool> load(String dir, {double threshold = 0.25}) async {
+    if (_loading) return _spotter != null;
+    // 门槛只在建 spotter 时读得进去，换了档位就得重来一遍。
+    if (_spotter != null && _threshold == threshold) return true;
+    if (_spotter != null) dispose();
     _loading = true;
     try {
       sherpa.initBindings();
@@ -41,15 +48,18 @@ class WakeWordEngine {
           ),
           keywordsFile: '$dir/keywords.txt',
           // 0.25 是官方示例的默认值：低一点更灵，但也更容易被相似音叫醒。
-          keywordsThreshold: 0.25,
+          // 现在由设置里的「唤醒灵敏度」决定（见 [WakeSensitivity]）。
+          keywordsThreshold: threshold,
           keywordsScore: 1.0,
         ),
       );
       _stream = _spotter!.createStream();
+      _threshold = threshold;
       return true;
     } on Object {
       _spotter?.free();
       _spotter = null;
+      _threshold = null;
       return false;
     } finally {
       _loading = false;
@@ -85,6 +95,7 @@ class WakeWordEngine {
     _stream = null;
     _spotter?.free();
     _spotter = null;
+    _threshold = null;
   }
 }
 

@@ -77,6 +77,31 @@ class SpeechGateTest {
         assertEquals(listOf(Edge.START), g.feed(-28.0, 20))
     }
 
+    @Test fun guardedOffsetRaisesTheBarForPlaybackEchoOnly() {
+        // echo at -36 dB: 26 dB over the -62 floor. Standard playing margin 24 → it trips.
+        val normal = SpeechGate(echoCancelled = true)
+        normal.feed(-62.0, 100)
+        normal.setPlaying(true, now)
+        normal.feed(-62.0, 25) // past SETTLE_MS (400 ms)
+        assertEquals(listOf(Edge.START), normal.feed(-36.0, 12))
+
+        // Guarded (+8): start threshold rises to -30, the same echo never trips.
+        val guarded = SpeechGate(echoCancelled = true).apply { bargeOffset = 8f }
+        guarded.feed(-62.0, 100)
+        guarded.setPlaying(true, now)
+        guarded.feed(-62.0, 25)
+        assertEquals(emptyList<Edge>(), guarded.feed(-36.0, 400))
+        // A real voice close to the phone still does.
+        assertEquals(listOf(Edge.START), guarded.feed(-24.0, 12))
+    }
+
+    @Test fun offsetIgnoredWhenNotPlaying() {
+        // Offset must not touch ordinary endpoint detection when she is silent.
+        val g = SpeechGate().apply { bargeOffset = 20f }
+        g.feed(-62.0, 100)
+        assertEquals(listOf(Edge.START), g.feed(-44.0, 10))
+    }
+
     @Test fun levels() {
         assertEquals(-100.0, SpeechGate.levelOf(ShortArray(320), 320), 0.0)
         val full = ShortArray(320) { if (it % 2 == 0) Short.MAX_VALUE else Short.MIN_VALUE }
