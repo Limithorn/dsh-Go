@@ -30,6 +30,7 @@ import '../../speech/speech_out.dart';
 import '../../speech/speech_settings.dart';
 import '../../speech/voice_cloud.dart';
 import '../../state/account_state.dart';
+import '../../state/android_features.dart' show operatingSystemProvider;
 import '../../state/app_notes.dart';
 import '../../state/picture_in_picture.dart';
 import '../../state/voice_call_host.dart';
@@ -896,7 +897,7 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     final blur = performance.blur;
     // The keys sit over a field that moves every frame, so their frosting is redone every
     // frame too: more than HarmonyOS's renderer, or the light mode, can spare.
-    final keyBlur = blur && !performance.lightweight;
+    final keyBlur = blur && !performance.lightweight && ref.watch(operatingSystemProvider) != 'ohos';
     final ended = _call.phase == CallPhase.ended;
     final image =
         settings.backdrop == CallBackdrop.image && settings.image.isNotEmpty && File(settings.image).existsSync()
