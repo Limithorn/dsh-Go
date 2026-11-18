@@ -36,6 +36,44 @@ final class SpeechStart extends SpeechAudioEvent {
   final bool over;
 }
 
+/// 声纹对"开口的这个人"的结论。
+enum VoiceprintKind {
+  /// 白名单里的人。
+  you,
+
+  /// 明确不是白名单里的人。
+  other,
+
+  /// 分不出（落在不确定带里，或算得太少）。
+  unknown;
+
+  static VoiceprintKind parse(Object? raw) => switch (raw) {
+    'you' => you,
+    'other' => other,
+    _ => unknown,
+  };
+}
+
+/// 声纹对「刚开口的这个人」的判断，与 [SpeechStart] 分开到。
+///
+/// 为什么不是合在一起：speechStart 要立刻发（duck 不能等），而声纹要一段音频
+/// 才算得出。所以先告诉 Dart「有人说话了」，再补一句「是谁」。
+///
+/// 功能关着、没有白名单、模型加载不了时**根本不会有这个事件**，Dart 走原路径。
+final class SpeechJudge extends SpeechAudioEvent {
+  const SpeechJudge({
+    required this.over,
+    required this.kind,
+    required this.score,
+    this.matched,
+  });
+
+  final bool over;
+  final VoiceprintKind kind;
+  final double score;
+  final String? matched;
+}
+
 /// One utterance, as a 16 kHz mono WAV, once the person paused.
 final class Utterance extends SpeechAudioEvent {
   const Utterance(this.wav, this.duration);
@@ -56,6 +94,43 @@ final class CallError extends SpeechAudioEvent {
 
 /// How long the person may pause before what they said counts as finished
 /// (通话设置 → 停顿多久算说完): 快 is how calls were before it was a choice.
+/// 插话灵敏度：只调「AI 正在说话」时把声音当成插话的门槛。
+/// 防误触把门槛抬高，最不容易被 AI 自己的回声打断（代价是真插话要更明显）。
+enum CallBargeSensitivity {
+  sensitive(-6),
+  normal(0),
+  guarded(8),
+
+  /// 更防误触：再抬高 6dB。适合外放、麦克风离扬声器近的机器。
+  ///
+  /// 这两档是为"被自己打断"补的：回声消不干净的手机上，光靠 AEC 的余量不够，
+  /// 只能把"多响才算有人插话"抬得更高。代价是真要插话时得说得更清楚。
+  resistant(14),
+
+  /// 最防误触：几乎只认"明显压过自己声音"的插话。
+  stubborn(20);
+
+  const CallBargeSensitivity(this.offset);
+
+  /// 传给原生 gate 的播放态门槛偏移（dB 档位，负=灵敏，正=迟钝）。
+  final double offset;
+}
+
+/// 声纹认人的宽严：只影响「和白名单像不像」这条线，不碰任何现有的门控阈值。
+///
+/// 宽松更容易把你的声音认成自己人（也可能把旁人放进来），严格更不容易认错
+/// （代价是你自己偶尔也会被挡在外面，要说得久一点）。
+enum VoiceprintLevel {
+  loose('loose'),
+  normal('normal'),
+  strict('strict');
+
+  const VoiceprintLevel(this.wire);
+
+  /// 传给原生的档位名，与 Kotlin 侧 Thresholds.Level 对应。
+  final String wire;
+}
+
 enum CallPause {
   quick(Duration.zero),
   normal(Duration(milliseconds: 400)),
@@ -66,6 +141,19 @@ enum CallPause {
   /// How much longer than 快 a finished utterance takes to come through
   /// (its trailing quiet: TurnPause.doneMs on the native side).
   final Duration longer;
+}
+
+/// 唤醒词灵敏度：直接改 sherpa KeywordSpotter 的 keywordsThreshold。
+/// 低一点更容易被叫醒，但也更容易被相似音误唤醒；高一点要说得准，误唤醒少。
+enum WakeSensitivity {
+  sensitive(0.15),
+  normal(0.25),
+  strict(0.40);
+
+  const WakeSensitivity(this.threshold);
+
+  /// 判定命中的分数门槛（sherpa 的 keywordsThreshold，越高越难叫醒）。
+  final double threshold;
 }
 
 enum CallStart { ok, permission, microphone, unavailable }
@@ -100,6 +188,12 @@ class SpeechAudio {
       },
       'playLevel' when args['id'] is String => PlayLevel(args['id'] as String, value()),
       'speechStart' => SpeechStart(over: args['over'] == true),
+      'speechJudge' => SpeechJudge(
+        over: args['over'] == true,
+        kind: VoiceprintKind.parse(args['verdict']),
+        score: (args['score'] as num?)?.toDouble() ?? 0,
+        matched: args['matched'] as String?,
+      ),
       'utterance' when args['wav'] is Uint8List => Utterance(
         args['wav'] as Uint8List,
         Duration(milliseconds: (args['ms'] as num?)?.toInt() ?? 0),
@@ -146,8 +240,16 @@ class SpeechAudio {
   /// Stream [id] quieter while the person may be speaking over it, or back to full.
   Future<void> duck(String id, bool on) => _invoke<void>('duck', {'id': id, 'on': on});
 
-  Future<CallStart> startCall({required bool bargeIn, CallPause pause = CallPause.normal}) async =>
-      switch (await _invoke<String>('callStart', {'bargeIn': bargeIn, 'pause': pause.name})) {
+  Future<CallStart> startCall({
+    required bool bargeIn,
+    CallPause pause = CallPause.normal,
+    CallBargeSensitivity sensitivity = CallBargeSensitivity.normal,
+  }) async =>
+      switch (await _invoke<String>('callStart', {
+        'bargeIn': bargeIn,
+        'pause': pause.name,
+        'offset': sensitivity.offset,
+      })) {
         'ok' => CallStart.ok,
         'permission' => CallStart.permission,
         'microphone' => CallStart.microphone,
@@ -160,7 +262,13 @@ class SpeechAudio {
     required bool bargeIn,
     required bool muted,
     CallPause pause = CallPause.normal,
-  }) async => switch (await _invoke<String>('callStart', {'bargeIn': bargeIn, 'pause': pause.name, 'muted': muted})) {
+    CallBargeSensitivity sensitivity = CallBargeSensitivity.normal,
+  }) async => switch (await _invoke<String>('callStart', {
+    'bargeIn': bargeIn,
+    'pause': pause.name,
+    'muted': muted,
+    'offset': sensitivity.offset,
+  })) {
     'ok' => CallStart.ok,
     'permission' => CallStart.permission,
     'microphone' => CallStart.microphone,

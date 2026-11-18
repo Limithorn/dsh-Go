@@ -11243,6 +11243,11 @@
   "speechCallFooter": "通话时说完一句停一下，就会发出去；回答边写边读。",
   "speechCallBargeIn": "插话打断",
   "speechCallBargeInHint": "AI 说话时你一开口，它先轻下来；「嗯」「对」它接着说，说别的它就停下听你",
+  "speechCallBargeSensitivity": "插话灵敏度",
+  "speechCallBargeSensitivityHint": "AI 说话时，多响才算你在插话。若它老被自己的声音打断，往右选",
+  "speechCallBargeSensitive": "灵敏",
+  "speechCallBargeNormal": "标准",
+  "speechCallBargeGuarded": "防误触",
   "speechCallSpoken": "口语回答",
   "speechCallSpokenHint": "通话的第一条消息会请 AI 简短、口语化地回答",
   "speechCallSpeaker": "默认免提",
@@ -11365,6 +11370,279 @@
   "wakeSessionNew": "每回新开一间",
   "wakeWordTitle": "唤醒词",
   "wakeWordHint": "填中文，比如 你好肥鱼",
+  "wakeSensitivityTitle": "唤醒灵敏度",
+  "wakeSensitivityHint": "多像才算是叫它。叫不醒就调灵敏，老被误唤醒就调严格",
+  "wakeSensitivitySensitive": "灵敏",
+  "wakeSensitivityNormal": "标准",
+  "wakeSensitivityStrict": "严格",
+  "speechVoiceprintSection": "只认这几个人的声音",
+  "speechVoiceprintFooter": "声纹只存在这台手机上，不会上传。录过的人之间可以互相插话——认的是「是不是自己人」，不是「是谁」。",
+  "speechVoiceprintSwitch": "只认这几个人的声音",
+  "speechVoiceprintSwitchHint": "她说话时，只有录过的人开口才会打断；旁人说话不打断",
+  "speechVoiceprintProfiles": "已录入的声音",
+  "speechVoiceprintEmpty": "还没录过",
+  "speechVoiceprintCount": "{count} 人",
+  "@speechVoiceprintCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "speechVoiceprintOthers": "允许其他人插话",
+  "speechVoiceprintOthersHint": "他们说话也能打断，只是她反应会慢一点",
+  "speechVoiceprintLevel": "识别灵敏度",
+  "speechVoiceprintLevelHint": "宽松更容易认出自己人，严格更不容易把旁人当成自己人",
+  "speechVoiceprintLoose": "宽松",
+  "speechVoiceprintNormal": "标准",
+  "speechVoiceprintStrict": "严格",
+  "speechVoiceprintOffHint": "打开上面的开关后，才能录入声音",
+  "speechVoiceprintListTitle": "已录入的声音",
+  "speechVoiceprintAdd": "添加一个声音",
+  "speechVoiceprintFull": "最多 5 个",
+  "speechVoiceprintFullHint": "删掉一个才能再录",
+  "speechVoiceprintRecordedAt": "{date} 录入",
+  "@speechVoiceprintRecordedAt": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "speechVoiceprintRename": "改个备注",
+  "speechVoiceprintDelete": "删掉这个声音",
+  "speechVoiceprintDeleteConfirm": "删掉后就认不出这位了。确定吗？",
+  "speechVoiceprintEnrollTitle": "录入声音",
+  "speechVoiceprintStepOne": "正常音量说点什么",
+  "speechVoiceprintStepTwo": "稍微远一点再说",
+  "speechVoiceprintStepThree": "带点背景音再说",
+  "speechVoiceprintStepHint": "不用念稿，像平时聊天那样就好",
+  "speechVoiceprintListening": "正在听…",
+  "speechVoiceprintTooQuiet": "太小声了，靠近一点",
+  "speechVoiceprintTooNoisy": "有点吵，换个安静些的地方",
+  "speechVoiceprintTooShort": "时长不够，再多说一会儿",
+  "speechVoiceprintGood": "刚好",
+  "speechVoiceprintNext": "下一步",
+  "speechVoiceprintRedo": "重录",
+  "speechVoiceprintCancel": "取消",
+  "speechVoiceprintSaving": "正在比对…",
+  "speechVoiceprintSelfCheckFailed": "这段和前后差别太大，重录一次吧",
+  "speechVoiceprintDuplicate": "这好像已经录过了",
+  "speechVoiceprintDuplicateHint": "和「{name}」很像。要覆盖那一条，还是取消？",
+  "@speechVoiceprintDuplicateHint": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "speechVoiceprintOverwrite": "覆盖",
+  "speechVoiceprintUnsupported": "这台手机不支持声纹识别",
+  "speechVoiceprintAside": "（旁边有人说话，她继续）",
+  "speechVoiceprintStart": "开始录音",
+  "speechVoiceprintChecking": "正在检查本机支持…",
+  "speechVoiceprintReady": "本机支持",
+  "speechVoiceprintMeter": "实测：{ms} 秒 · 响度 {db} dB · 杂音 {noise}",
+  "@speechVoiceprintMeter": {
+    "placeholders": {
+      "ms": {
+        "type": "String"
+      },
+      "db": {
+        "type": "String"
+      },
+      "noise": {
+        "type": "String"
+      }
+    }
+  },
+  "speechVoiceprintDiagnostics": "声纹诊断",
+  "speechVoiceprintDiagEmpty": "还没有记录。打一通电话，说几句话，回来这里看。",
+  "speechVoiceprintDiagYouMin": "自己人最低分 {score}",
+  "@speechVoiceprintDiagYouMin": {
+    "placeholders": {
+      "score": {
+        "type": "String"
+      }
+    }
+  },
+  "speechVoiceprintDiagYouCount": "{count} 次判成自己人",
+  "@speechVoiceprintDiagYouCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "speechVoiceprintDiagOtherMax": "旁人最高分 {score}",
+  "@speechVoiceprintDiagOtherMax": {
+    "placeholders": {
+      "score": {
+        "type": "String"
+      }
+    }
+  },
+  "speechVoiceprintDiagOtherCount": "{count} 次判成旁人",
+  "@speechVoiceprintDiagOtherCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "speechVoiceprintDiagGap": "两堆相隔 {gap}",
+  "@speechVoiceprintDiagGap": {
+    "placeholders": {
+      "gap": {
+        "type": "String"
+      }
+    }
+  },
+  "speechVoiceprintDiagSeparated": "分得开：阈值可以画在中间",
+  "speechVoiceprintDiagOverlap": "有重叠：这个档位分不开，换严格一档或重录",
+  "speechVoiceprintDiagListTitle": "每一次判定",
+  "speechVoiceprintDiagYou": "自己人",
+  "speechVoiceprintDiagOther": "旁人",
+  "speechVoiceprintDiagUnknown": "认不准",
+  "speechVoiceprintDiagOver": "插话时",
+  "speechVoiceprintDiagClear": "清空记录",
+  "speechVoiceprintDiagSelfCheck": "用你自己的录音自检",
+  "speechVoiceprintDiagSelfCheckHint": "拿录入时的音频再比一次，看看你的声音能打多少分。这是阈值的下限参考。",
+  "speechVoiceprintDiagSelfCheckRun": "开始自检",
+  "speechVoiceprintDiagSelfCheckRunning": "正在比对…",
+  "speechVoiceprintDiagSelfAvg": "你的声音平均 {score}",
+  "@speechVoiceprintDiagSelfAvg": {
+    "placeholders": {
+      "score": {
+        "type": "String"
+      }
+    }
+  },
+  "speechVoiceprintDiagSelfMin": "{score}",
+  "@speechVoiceprintDiagSelfMin": {
+    "placeholders": {
+      "score": {
+        "type": "String"
+      }
+    }
+  },
+  "speechVoiceprintDiagSelfAdvice": "阈值应低于这个数，否则你会被当成旁人",
+  "speechVoiceprintDiagThreshold": "当前判自己人的线是 {accept}，判旁人的线是 {reject}",
+  "@speechVoiceprintDiagThreshold": {
+    "placeholders": {
+      "accept": {
+        "type": "String"
+      },
+      "reject": {
+        "type": "String"
+      }
+    }
+  },
+  "speechVoiceprintDiagNoProfile": "先录一条声音再自检",
+  "speechVoiceprintDiagWhat": "这些分数是每次开口时，你的声音和已录音声纹的相似度。",
+  "speechVoiceprintDiagCompare": "比对样本",
+  "speechVoiceprintDiagCompareHint": "录一段你自己的、一段旁人的，直接看两者各得多少分。不用打电话，也不用等她说话。",
+  "speechVoiceprintDiagOwn": "我的声音",
+  "speechVoiceprintDiagOther2": "旁人的声音",
+  "speechVoiceprintDiagRecordOwn": "录一段我的",
+  "speechVoiceprintDiagRecordOther": "录一段旁人的",
+  "speechVoiceprintDiagRecording": "录音中…请说话",
+  "speechVoiceprintDiagNeedProfile": "先录一条声纹，再来试",
+  "speechVoiceprintDiagOwnScore": "你的声音：{score}",
+  "@speechVoiceprintDiagOwnScore": {
+    "placeholders": {
+      "score": {
+        "type": "String"
+      }
+    }
+  },
+  "speechVoiceprintDiagOtherScore": "旁人声音：{score}",
+  "@speechVoiceprintDiagOtherScore": {
+    "placeholders": {
+      "score": {
+        "type": "String"
+      }
+    }
+  },
+  "speechVoiceprintDiagAdviceOk": "分得开。阈值放在 {low} 到 {high} 之间都行。",
+  "@speechVoiceprintDiagAdviceOk": {
+    "placeholders": {
+      "low": {
+        "type": "String"
+      },
+      "high": {
+        "type": "String"
+      }
+    }
+  },
+  "speechVoiceprintDiagAdviceTight": "分得不太开（只差 {gap}），建议选严格一档，或重录声纹。",
+  "@speechVoiceprintDiagAdviceTight": {
+    "placeholders": {
+      "gap": {
+        "type": "String"
+      }
+    }
+  },
+  "speechVoiceprintDiagAdviceBad": "分不开：旁人的分比你还高。这个档位不能用，换严格一档并重录。",
+  "@speechVoiceprintDiagAdviceBad": {
+    "placeholders": {}
+  },
+  "speechVoiceprintDiagRerecord": "重录",
+  "speechVoiceprintDiagTry": "录一句试试",
+  "speechVoiceprintDiagTryHint": "点一下，说一句话，立刻告诉你这句被判成什么、多少分。不用打电话。",
+  "speechVoiceprintDiagTryRecording": "录音中…请说话",
+  "speechVoiceprintDiagTryResult": "这句是 {verdict}",
+  "@speechVoiceprintDiagTryResult": {
+    "placeholders": {
+      "verdict": {
+        "type": "String"
+      }
+    }
+  },
+  "speechVoiceprintDiagTryScore": "相似度 {score}（判自己人的线 {accept}，判旁人的线 {reject}）",
+  "@speechVoiceprintDiagTryScore": {
+    "placeholders": {
+      "score": {
+        "type": "String"
+      },
+      "accept": {
+        "type": "String"
+      },
+      "reject": {
+        "type": "String"
+      }
+    }
+  },
+  "speechVoiceprintDiagTryShort": "说得太短，再来一次",
+  "speechVoiceprintDiagTryFail": "这段算不出声纹，重说一次",
+  "speechVoiceprintWake": "唤醒时也认声音",
+  "speechVoiceprintWakeHint": "叫名字的人不在上面这些声音里，就不答应",
+  "speechVoiceprintOthersHint2": "旁人说话也能打断，只是她会慢一拍；关掉就只有录过的人能打断",
+  "speechCallBargeResistant": "更防误触",
+  "speechCallBargeStubborn": "最防误触",
+  "speechVoiceprintRetryThis": "重录这一段",
+  "speechVoiceprintRetryThisHint": "已经收下 {count} 段，还差 {left} 段",
+  "@speechVoiceprintRetryThisHint": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "left": {
+        "type": "int"
+      }
+    }
+  },
+  "speechVoiceprintSelfCheckFailedNum": "三段之间最不像的一条只有 {score}，低于 {need}。把最不像那遍重说一次",
+  "@speechVoiceprintSelfCheckFailedNum": {
+    "placeholders": {
+      "score": {
+        "type": "String"
+      },
+      "need": {
+        "type": "String"
+      }
+    }
+  },
   "starPromptTitle": "{hours, plural, =0{本鱼已经在 DSH Go 里陪你半个小时啦⁠~} =1{本鱼已经在 DSH Go 里陪你一个小时啦⁠~} other{本鱼已经在 DSH Go 里陪你 {hours} 个小时啦⁠~}}",
   "@starPromptTitle": {
     "description": "The star prompt's first line. hours is the whole hours of use so far, rounded down; 0 is half an hour (the first ask comes after 30 minutes). The word joiner keeps the ~ on the line of the word before it.",

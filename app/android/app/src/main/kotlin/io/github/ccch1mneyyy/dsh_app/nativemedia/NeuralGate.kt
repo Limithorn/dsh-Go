@@ -44,6 +44,12 @@ class NeuralGate(
     private var utteranceSamples = 0
     private var playingSince = -1L
 
+    /**
+     * 播放态插话门槛偏移（dB 档位，正=更迟钝）。VAD 概率每 1 dB 折算 0.01，
+     * 与能量门共用一个档位值；只在 playing 时叠加。
+     */
+    override var bargeOffset: Float = 0f
+
     /** This pause's check failed: it ends after the energy gate's hangover instead. */
     private var turnFailed = false
 
@@ -62,7 +68,9 @@ class NeuralGate(
         val prediction = completed.getAndSet(null)
         if (prediction != null) pending = false
         val playing = playingSince >= 0
-        val threshold = if (playing) (if (echoCancelled) PLAY_THRESHOLD else PLAY_NO_AEC_THRESHOLD) else THRESHOLD
+        // 播放态叠加用户的插话灵敏度档位：更高门槛 = 更不易把回声当插话。
+        val offset = if (playing) bargeOffset * 0.01f else 0f
+        val threshold = (if (playing) (if (echoCancelled) PLAY_THRESHOLD else PLAY_NO_AEC_THRESHOLD) else THRESHOLD) + offset
         val voice = probability >= threshold
         if (!speaking) {
             if (playing && nowMs - playingSince < SpeechGate.SETTLE_MS) {

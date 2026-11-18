@@ -20,6 +20,9 @@ class SpeechGate(
 ) : TurnGate {
     enum class Edge { NONE, START, END }
 
+    /** 播放态门槛偏移：正=更难被误判成插话（更不易自打断）。 */
+    override var bargeOffset: Float = 0f
+
     private var floor = Double.NaN
     private var loud = 0
     private var quietMs = 0L
@@ -50,7 +53,13 @@ class SpeechGate(
         // clip's echo (it would carry the threshold up with it).
         if (levelDb < floor) floor += (levelDb - floor) * 0.5
         else if (!speaking && !playing) floor += (levelDb - floor) * 0.01
-        val start = max(floor + if (playing) playMargin() else MARGIN_DB, if (playing) PLAY_MIN_DB else MIN_DB)
+        // 播放态叠加用户选的插话灵敏度档位偏移（更迟钝→门槛更高）。
+        // floor 只在非播放、非说话时缓慢上升，回声不会把门限顶高，所以偏移稳定生效。
+        val offset = if (playing) bargeOffset.toDouble() else 0.0
+        val start = max(
+            floor + (if (playing) playMargin() else MARGIN_DB) + offset,
+            (if (playing) PLAY_MIN_DB else MIN_DB) + offset,
+        )
         if (!speaking) {
             if (playing && nowMs - playingSince < SETTLE_MS) {
                 loud = 0

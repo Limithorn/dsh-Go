@@ -19919,6 +19919,22 @@ class L10nEn extends L10n {
       'When you speak over the AI it goes quiet; a “yeah” lets it go on, anything else stops it';
 
   @override
+  String get speechCallBargeSensitivity => 'Interrupt sensitivity';
+
+  @override
+  String get speechCallBargeSensitivityHint =>
+      'How loud you must be to interrupt. If she keeps cutting herself off, move right';
+
+  @override
+  String get speechCallBargeSensitive => 'Sensitive';
+
+  @override
+  String get speechCallBargeNormal => 'Normal';
+
+  @override
+  String get speechCallBargeGuarded => 'Guarded';
+
+  @override
   String get speechCallSpoken => 'Spoken answers';
 
   @override
@@ -20197,6 +20213,375 @@ class L10nEn extends L10n {
 
   @override
   String get wakeWordHint => 'Chinese, e.g. 你好肥鱼';
+
+  @override
+  String get wakeSensitivityTitle => 'Wake sensitivity';
+
+  @override
+  String get wakeSensitivityHint =>
+      'How close it must be to count as calling it. Raise it if it wakes too easily, lower it if it does not hear you';
+
+  @override
+  String get wakeSensitivitySensitive => 'Sensitive';
+
+  @override
+  String get wakeSensitivityNormal => 'Normal';
+
+  @override
+  String get wakeSensitivityStrict => 'Strict';
+
+  @override
+  String get speechVoiceprintSection => 'Only these voices';
+
+  @override
+  String get speechVoiceprintFooter =>
+      'Voiceprints stay on this phone; nothing is uploaded. People you enrolled can still interrupt each other — this recognises \"one of us\", not \"which one\".';
+
+  @override
+  String get speechVoiceprintSwitch => 'Only these voices';
+
+  @override
+  String get speechVoiceprintSwitchHint =>
+      'While she talks, only voices you enrolled can interrupt; anyone else does not';
+
+  @override
+  String get speechVoiceprintProfiles => 'Enrolled voices';
+
+  @override
+  String get speechVoiceprintEmpty => 'None yet';
+
+  @override
+  String speechVoiceprintCount(int count) {
+    return '$count';
+  }
+
+  @override
+  String get speechVoiceprintOthers => 'Let others interrupt';
+
+  @override
+  String get speechVoiceprintOthersHint => 'They can interrupt too, she just takes a moment longer';
+
+  @override
+  String get speechVoiceprintLevel => 'How sure';
+
+  @override
+  String get speechVoiceprintLevelHint =>
+      'Loose recognises your own voice more easily; strict is less likely to take a stranger for one of you';
+
+  @override
+  String get speechVoiceprintLoose => 'Loose';
+
+  @override
+  String get speechVoiceprintNormal => 'Normal';
+
+  @override
+  String get speechVoiceprintStrict => 'Strict';
+
+  @override
+  String get speechVoiceprintOffHint => 'Turn the switch above on to record a voice';
+
+  @override
+  String get speechVoiceprintListTitle => 'Enrolled voices';
+
+  @override
+  String get speechVoiceprintAdd => 'Add a voice';
+
+  @override
+  String get speechVoiceprintFull => 'Five at most';
+
+  @override
+  String get speechVoiceprintFullHint => 'Delete one to record another';
+
+  @override
+  String speechVoiceprintRecordedAt(String date) {
+    return 'Added $date';
+  }
+
+  @override
+  String get speechVoiceprintRename => 'Rename';
+
+  @override
+  String get speechVoiceprintDelete => 'Delete this voice';
+
+  @override
+  String get speechVoiceprintDeleteConfirm => 'She will no longer recognise this person. Delete it?';
+
+  @override
+  String get speechVoiceprintEnrollTitle => 'Record a voice';
+
+  @override
+  String get speechVoiceprintStepOne => 'Say something at your normal volume';
+
+  @override
+  String get speechVoiceprintStepTwo => 'Now a little further away';
+
+  @override
+  String get speechVoiceprintStepThree => 'Now with some background noise';
+
+  @override
+  String get speechVoiceprintStepHint => 'No script — talk the way you normally would';
+
+  @override
+  String get speechVoiceprintListening => 'Listening…';
+
+  @override
+  String get speechVoiceprintTooQuiet => 'Too quiet — come a little closer';
+
+  @override
+  String get speechVoiceprintTooNoisy => 'A bit noisy — somewhere quieter';
+
+  @override
+  String get speechVoiceprintTooShort => 'Too short — keep talking a little longer';
+
+  @override
+  String get speechVoiceprintGood => 'Good';
+
+  @override
+  String get speechVoiceprintNext => 'Next';
+
+  @override
+  String get speechVoiceprintRedo => 'Redo';
+
+  @override
+  String get speechVoiceprintCancel => 'Cancel';
+
+  @override
+  String get speechVoiceprintSaving => 'Comparing…';
+
+  @override
+  String get speechVoiceprintSelfCheckFailed => 'That take differed a lot from the others — record it again';
+
+  @override
+  String get speechVoiceprintDuplicate => 'This sounds familiar';
+
+  @override
+  String speechVoiceprintDuplicateHint(String name) {
+    return 'It is very close to \"$name\". Replace that one, or cancel?';
+  }
+
+  @override
+  String get speechVoiceprintOverwrite => 'Replace';
+
+  @override
+  String get speechVoiceprintUnsupported => 'This phone cannot tell voices apart';
+
+  @override
+  String get speechVoiceprintAside => '(someone else is talking; she goes on)';
+
+  @override
+  String get speechVoiceprintStart => 'Start recording';
+
+  @override
+  String get speechVoiceprintChecking => 'Checking this phone…';
+
+  @override
+  String get speechVoiceprintReady => 'Supported here';
+
+  @override
+  String speechVoiceprintMeter(String ms, String db, String noise) {
+    return '$ms s · $db dB · noise $noise';
+  }
+
+  @override
+  String get speechVoiceprintDiagnostics => 'Voiceprint diagnostics';
+
+  @override
+  String get speechVoiceprintDiagEmpty => 'Nothing yet. Make a call, say a few things, come back.';
+
+  @override
+  String speechVoiceprintDiagYouMin(String score) {
+    return 'Lowest own-voice score $score';
+  }
+
+  @override
+  String speechVoiceprintDiagYouCount(int count) {
+    return '$count taken as your own';
+  }
+
+  @override
+  String speechVoiceprintDiagOtherMax(String score) {
+    return 'Highest stranger score $score';
+  }
+
+  @override
+  String speechVoiceprintDiagOtherCount(int count) {
+    return '$count taken as a stranger';
+  }
+
+  @override
+  String speechVoiceprintDiagGap(String gap) {
+    return 'Gap between them $gap';
+  }
+
+  @override
+  String get speechVoiceprintDiagSeparated => 'They separate: the line can go between';
+
+  @override
+  String get speechVoiceprintDiagOverlap => 'They overlap: this setting cannot tell them apart';
+
+  @override
+  String get speechVoiceprintDiagListTitle => 'Every decision';
+
+  @override
+  String get speechVoiceprintDiagYou => 'own voice';
+
+  @override
+  String get speechVoiceprintDiagOther => 'stranger';
+
+  @override
+  String get speechVoiceprintDiagUnknown => 'unsure';
+
+  @override
+  String get speechVoiceprintDiagOver => 'over her';
+
+  @override
+  String get speechVoiceprintDiagClear => 'Clear';
+
+  @override
+  String get speechVoiceprintDiagSelfCheck => 'Check with your own recording';
+
+  @override
+  String get speechVoiceprintDiagSelfCheckHint =>
+      'Compare the enrolment audio against the saved voiceprint again — this is the floor your threshold must sit below.';
+
+  @override
+  String get speechVoiceprintDiagSelfCheckRun => 'Run the check';
+
+  @override
+  String get speechVoiceprintDiagSelfCheckRunning => 'Comparing…';
+
+  @override
+  String speechVoiceprintDiagSelfAvg(String score) {
+    return 'Your voice averages $score';
+  }
+
+  @override
+  String speechVoiceprintDiagSelfMin(String score) {
+    return '$score';
+  }
+
+  @override
+  String get speechVoiceprintDiagSelfAdvice =>
+      'The threshold must stay below this, or you will be taken for a stranger';
+
+  @override
+  String speechVoiceprintDiagThreshold(String accept, String reject) {
+    return 'Own-voice line $accept, stranger line $reject';
+  }
+
+  @override
+  String get speechVoiceprintDiagNoProfile => 'Record a voice before checking';
+
+  @override
+  String get speechVoiceprintDiagWhat =>
+      'Each score is how close the voice at that moment was to your enrolled voiceprint.';
+
+  @override
+  String get speechVoiceprintDiagCompare => 'Compare samples';
+
+  @override
+  String get speechVoiceprintDiagCompareHint =>
+      'Record one clip of yourself and one of someone else — see what each scores. No call needed.';
+
+  @override
+  String get speechVoiceprintDiagOwn => 'My voice';
+
+  @override
+  String get speechVoiceprintDiagOther2 => 'Someone else';
+
+  @override
+  String get speechVoiceprintDiagRecordOwn => 'Record mine';
+
+  @override
+  String get speechVoiceprintDiagRecordOther => 'Record another person';
+
+  @override
+  String get speechVoiceprintDiagRecording => 'Recording… speak';
+
+  @override
+  String get speechVoiceprintDiagNeedProfile => 'Enrol a voiceprint first';
+
+  @override
+  String speechVoiceprintDiagOwnScore(String score) {
+    return 'Yours: $score';
+  }
+
+  @override
+  String speechVoiceprintDiagOtherScore(String score) {
+    return 'Theirs: $score';
+  }
+
+  @override
+  String speechVoiceprintDiagAdviceOk(String low, String high) {
+    return 'Separated. Any line between $low and $high will do.';
+  }
+
+  @override
+  String speechVoiceprintDiagAdviceTight(String gap) {
+    return 'Barely separated ($gap). Try the strict setting, or re-enrol.';
+  }
+
+  @override
+  String get speechVoiceprintDiagAdviceBad => 'No separation: the other voice scores higher than yours.';
+
+  @override
+  String get speechVoiceprintDiagRerecord => 'Record again';
+
+  @override
+  String get speechVoiceprintDiagTry => 'Say a line';
+
+  @override
+  String get speechVoiceprintDiagTryHint =>
+      'Tap, say one sentence, and see what it is judged as and by how much. No call needed.';
+
+  @override
+  String get speechVoiceprintDiagTryRecording => 'Recording… speak';
+
+  @override
+  String speechVoiceprintDiagTryResult(String verdict) {
+    return 'That was $verdict';
+  }
+
+  @override
+  String speechVoiceprintDiagTryScore(String score, String accept, String reject) {
+    return 'Similarity $score (own line $accept, stranger line $reject)';
+  }
+
+  @override
+  String get speechVoiceprintDiagTryShort => 'Too short — once more';
+
+  @override
+  String get speechVoiceprintDiagTryFail => 'Could not read a voiceprint from that; try again';
+
+  @override
+  String get speechVoiceprintWake => 'Recognise voices on wake word too';
+
+  @override
+  String get speechVoiceprintWakeHint =>
+      'If the person who said the wake word is not one of these voices, she stays quiet';
+
+  @override
+  String get speechVoiceprintOthersHint2 =>
+      'Others can interrupt too, she just takes a moment longer. Turn off and only enrolled voices can interrupt';
+
+  @override
+  String get speechCallBargeResistant => 'Resistant';
+
+  @override
+  String get speechCallBargeStubborn => 'Stubborn';
+
+  @override
+  String get speechVoiceprintRetryThis => 'Say this one again';
+
+  @override
+  String speechVoiceprintRetryThisHint(int count, int left) {
+    return '$count kept, $left to go';
+  }
+
+  @override
+  String speechVoiceprintSelfCheckFailedNum(String score, String need) {
+    return 'The least consistent take scores $score, below $need. Say that one again';
+  }
 
   @override
   String starPromptTitle(int hours) {

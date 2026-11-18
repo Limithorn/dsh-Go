@@ -1,0 +1,26 @@
+3dspeaker_campplus_sv_zh-cn_16k-common.onnx
+
+Apache License 2.0
+
+Upstream model: 3D-Speaker CAM++ (speech_campplus_sv_zh-cn_16k-common)
+Upstream home:  https://www.modelscope.cn/models/iic/speech_campplus_sv_zh-cn_16k-common
+Authors:        3D-Speaker team (Zheng et al.), paper arXiv:2303.00332
+ONNX export:    k2-fsa/sherpa-onnx release "speaker-recongition-models"
+
+File from:      https://github.com/k2-fsa/sherpa-onnx/releases/download/
+                speaker-recongition-models/
+                3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx
+Bytes:          28281138
+SHA-256:        f682b514c05d947ee3fa91cd6ec6c5c7543479a128373fa29b1faedccd21fd11
+Modifications:  none (the bytes are the release asset as published)
+
+Model metadata carried inside the graph:
+  framework=3d-speaker  language=Chinese  sample_rate=16000
+  output_dim=192  normalize_samples=1  feature_normalize_type=global-mean
+
+Input   x         [batch, frames, 80]  float32  Kaldi-style log-mel
+Output  embedding [batch, 192]         float32
+
+Trained on roughly 200k Chinese speakers. Report a 4.32% EER on CN-Celeb.
+Distributed under the Apache License, Version 2.0; see
+  https://www.apache.org/licenses/LICENSE-2.0

@@ -45,6 +45,9 @@ class CallCapture(
     private var thread: Thread? = null
     private var gate: TurnGate? = null
 
+    /** 通话进行中改门槛（声纹人数变了要重算），不动正在读的音频。 */
+    internal fun currentGate(): TurnGate? = gate
+
     @Volatile private var running = false
     @Volatile private var playing = false
     @Volatile private var pcmEpoch = 0
@@ -54,6 +57,17 @@ class CallCapture(
             field = value
         }
     @Volatile var bargeIn = true
+
+    /**
+     * 播放态插话门槛偏移档位（0=标准，正=更迟钝/更不易自打断，负=更灵敏）。
+     * 改动即时作用到当前 gate；gate 为能量门/神经门时换算略有不同，统一用 dB 档位。
+     */
+    @Volatile var bargeOffset: Float = 0f
+        set(value) {
+            field = value
+            val g = gate ?: return
+            synchronized(g) { g.bargeOffset = value }
+        }
 
     /** How long a pause ends what the person says; a change applies from the next frame. */
     @Volatile var pause = TurnPause.NORMAL
@@ -101,7 +115,7 @@ class CallCapture(
                 runCatching { effect.setEnabled(true) }
             }
         }
-        val g = createGate(echoCancelled).also { it.pause = pause }
+        val g = createGate(echoCancelled).also { it.pause = pause; it.bargeOffset = bargeOffset }
         val started = runCatching { r.startRecording() }.isSuccess && r.recordingState == AudioRecord.RECORDSTATE_RECORDING
         if (!started) {
             g.close()
