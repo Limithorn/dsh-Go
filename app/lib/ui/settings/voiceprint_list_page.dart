@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
+import '../../companion/companion_voice.dart';
 import '../../speech/voiceprint_store.dart';
 import '../shell/page_frame.dart';
 import '../settings/settings_widgets.dart';
@@ -20,6 +21,14 @@ import 'voiceprint_enroll_page.dart';
 /// （声纹删了就得重录）。这些值得一整页，而不是塞在开关下面。
 class VoiceprintListPage extends ConsumerWidget {
   const VoiceprintListPage({super.key});
+
+  /// 回放录入时存下的那段音频。
+  ///
+  /// 复用 CompanionVoice 的播放通道：它已经处理了音频焦点、被打断、
+  /// 回调时序这些事，没必要再养一个播放器。
+  static Future<void> _play(String path) async {
+    await CompanionVoice().play('voiceprint-clip', path);
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -46,7 +55,19 @@ class VoiceprintListPage extends ConsumerWidget {
                   // 音源要显出来：同一个人可能有两份（通话一份、唤醒一份），
                   // 只看「#1 #2」分不清哪份是哪种场景录的。
                   subtitle:
-                      '${profiles[i].source.label} · ${l10n.speechVoiceprintRecordedAt(_shortDate(profiles[i].createdAt))}',
+                      '${profiles[i].source.label} · ${l10n.speechVoiceprintRecordedAt(_shortDate(profiles[i].createdAt))}'
+                      '${profiles[i].clipPath.isEmpty ? '' : ' · 可回放'}',
+                  // 有录音就给个独立的回放入口：点整行是进详情，容易点错。
+                  // 旧版本录的没有音频，这时候不给按钮。
+                  trailing: profiles[i].clipPath.isEmpty
+                      ? null
+                      : IconButton(
+                          key: ValueKey('voiceprint-play-${profiles[i].id}'),
+                          icon: const Icon(Icons.play_circle_outline, size: 20),
+                          tooltip: '回放当时的录音',
+                          onPressed: () => unawaited(_play(profiles[i].clipPath)),
+                          visualDensity: VisualDensity.compact,
+                        ),
                   onTap: () => unawaited(_open(context, ref, profiles[i])),
                 ),
             ],

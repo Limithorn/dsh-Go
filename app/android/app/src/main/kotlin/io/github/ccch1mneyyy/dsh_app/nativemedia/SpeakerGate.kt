@@ -261,9 +261,29 @@ class SpeakerGate(
     }
 
     private fun judge(audio: FloatArray, atFrame: Long): Verdict? {
-        val vector = embedder.embed(audio) ?: return null
         val list = profiles.current()
         if (list.isEmpty()) return null
+
+        // 先看这段里到底有多少是真的在说话。
+        //
+        // 为什么必须查：送进来的永远是整整 1.5 秒，但人可能只说 0.3 秒就停。
+        // 剩下的空白照样被送去算 embedding——而"空白"和"空白"算出来的向量
+        // 几乎一样，余弦接近 1。实测就踩过：没说话时冒出 0.803 的"本人"，
+        // 那不是认错人，是把两段静音都算成了同一个东西。
+        //
+        // 这里用量化的能量分布：按 20ms 一帧算 RMS，取高分位的帧作为"说话
+        // 电平"，再看有多少帧达到它的 [VOICED_RATIO]。占比太低就判定为
+        // "这段里没什么人声"，直接报 UNKNOWN——不猜，也不放行。
+        val voiced = SpeakerGate.voicedFraction(audio)
+        if (voiced < MIN_VOICED_FRACTION) {
+            android.util.Log.i(
+                "SpeakerGate",
+                "skip: voiced=${"%.2f".format(voiced)} < $MIN_VOICED_FRACTION（近乎空白，不参与比对）",
+            )
+            return Verdict(Kind.UNKNOWN, -1f, null, overPlayback = playing, atFrame = atFrame)
+        }
+
+        val vector = embedder.embed(audio) ?: return null
         var best = -1f
         var bestId: String? = null
         for (p in list) {
@@ -326,6 +346,23 @@ class SpeakerGate(
         const val DUMP_MIN_RMS = 1e-3
         const val RATE = 16000
 
+        /**
+         * 判定"这一帧算在说话"的余量：比说话电平低 25dB 之内。
+         *
+         * 太小会把轻声的字漏掉（分数算不准），太大又会让空白帧混进来
+         * （那正是分数虚高的来源）。25dB 按实测取：同一段话里响帧与轻帧
+         * 通常差 10~20dB，空白帧则在 40dB 以上。
+         */
+        const val VOICED_MARGIN_DB = 25.0
+
+        /**
+         * 整段里至少这么多比例在说话，才拿去做比对。
+         *
+         * 0.15：1.5 秒的窗口里只要有 225ms 在说话就够——短促的"等等"也
+         * 该认得出；再低就挡不住"大半空白"那种，而那种正是分数虚高的来源。
+         */
+        const val MIN_VOICED_FRACTION = 0.15
+
         /** 单模板默认门槛（P0 实测前先用这些值；只影响判定，不动任何现有阈值）。 */
         const val DEFAULT_ACCEPT = 0.72f
         const val DEFAULT_REJECT = 0.60f
@@ -336,5 +373,40 @@ class SpeakerGate(
             for (i in a.indices) s += a[i].toDouble() * b[i]
             return s.toFloat()
         }
+        /**
+         * 这段音频里"像在说话"的比例。
+         *
+         * 做法：20ms 一帧算 RMS（dB），取 90 分位当说话电平，再数有多少帧在
+         * 那个电平以下 25dB 之内。返回 0..1。
+         *
+         * 90 分位而不是最大值：单个爆音不该把门槛抬到天上。25dB 的门槛来自
+         * 实测——同一段话里响帧和轻帧通常差 10~20dB，超过 25dB 就基本是空白了。
+         */
+        fun voicedFraction(audio: FloatArray): Double {
+            val frameLen = 320 // 20ms @16k
+            val n = audio.size / frameLen
+            if (n <= 0) return 0.0
+            val db = DoubleArray(n)
+            for (f in 0 until n) {
+                var sum = 0.0
+                val start = f * frameLen
+                for (i in start until start + frameLen) {
+                    val v = audio[i].toDouble()
+                    sum += v * v
+                }
+                val rms = kotlin.math.sqrt(sum / frameLen)
+                db[f] = 20.0 * kotlin.math.log10(kotlin.math.max(rms, 1e-12))
+            }
+            val sorted = db.clone()
+            sorted.sort()
+            val ref = sorted[((n - 1) * 0.9).toInt()]
+            // 91.2dBFS 是 16bit 的底：比这还低就是纯静音，不用看了。
+            if (ref < -91.0) return 0.0
+            var voiced = 0
+            for (v in db) if (v > ref - VOICED_MARGIN_DB) voiced++
+            return voiced.toDouble() / n
+        }
+
+
     }
 }

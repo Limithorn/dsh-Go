@@ -387,9 +387,24 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                 val token = micVoiceprint
                 micVoiceprint = 0
                 if (token != 0) MicArbiter.endDictation(token)
+                // 存一份原始音频。
+                //
+                // 用户提的：录进去的声纹能不能回放。之前只留了 192 维向量，
+                // 想听"当时到底录到了什么"没有办法——而这恰恰是排查
+                // "为什么认不出来"最需要的东西（比如录进去一半是空白）。
+                val clip = runCatching {
+                    val stamp = System.currentTimeMillis()
+                    val f = File(
+                        File(context.getExternalFilesDir(null), "voiceprint-clips").apply { mkdirs() },
+                        "vp-$stamp.wav",
+                    )
+                    SpeakerScreenTest.writeWav(f, samples)
+                    f.absolutePath
+                }.getOrNull()
                 result.success(
                     mapOf(
                         "samples" to samples,
+                        "clip" to clip,
                         "ms" to (samples.size * 1000L / VoiceprintRecorder.RATE),
                         "loudness" to VoiceprintRecorder.loudness(samples),
                         "noisiness" to VoiceprintRecorder.noisiness(samples),
