@@ -147,6 +147,8 @@ class CallSettings {
     this.voiceprint = false,
     this.voiceprintOthers = true,
     this.voiceprintLevel = VoiceprintLevel.normal,
+    this.voiceprintBias = 0,
+    this.voiceprintMic = VoiceprintMic.normal,
     this.voiceprintWake = false,
   });
 
@@ -193,6 +195,25 @@ class CallSettings {
   /// 认得松还是严。
   final VoiceprintLevel voiceprintLevel;
 
+  /// 在自己这台机器上再微调多少。
+  ///
+  /// [voiceprintLevel] 那三档是按"正常手机"定的，可 AEC 削掉多少分跟机型、
+  /// 麦克风、外壳都有关。同一句"是我"，有的机器能到 0.7、有的只有 0.5。
+  /// 这里让人按实测把线挪一点，不用去改代码里那张表。
+  ///
+  /// 单位就是余弦分：−0.20 ~ +0.20。0 表示完全按档位算。
+  final double voiceprintBias;
+
+  /// 这台机器收进来的声音有多大。
+  ///
+  /// 通话采集走 VOICE_COMMUNICATION + AEC——这是对的，声纹要和通话同分布——
+  /// 但 AEC 削掉多少跟机型、麦克风、外壳都有关。正常手机说话 RMS 约 −25dBFS，
+  /// 有的机器只有 −60dBFS，差 35dB。差这么多时，按正常电平定的"有没有人在说"
+  /// 会把每一帧都判成静默，声纹直接失效（表现：谁都打断不了）。
+  ///
+  /// 与其写死一套数换台机器就坏，不如让人选"我这台机器收得小"。
+  final VoiceprintMic voiceprintMic;
+
   CallSettings copyWith({
     bool? bargeIn,
     bool? spoken,
@@ -207,6 +228,8 @@ class CallSettings {
     bool? voiceprintOthers,
     bool? voiceprintWake,
     VoiceprintLevel? voiceprintLevel,
+    double? voiceprintBias,
+    VoiceprintMic? voiceprintMic,
   }) => CallSettings(
     bargeIn: bargeIn ?? this.bargeIn,
     spoken: spoken ?? this.spoken,
@@ -221,6 +244,8 @@ class CallSettings {
     voiceprintOthers: voiceprintOthers ?? this.voiceprintOthers,
     voiceprintWake: voiceprintWake ?? this.voiceprintWake,
     voiceprintLevel: voiceprintLevel ?? this.voiceprintLevel,
+    voiceprintBias: voiceprintBias ?? this.voiceprintBias,
+    voiceprintMic: voiceprintMic ?? this.voiceprintMic,
   );
 }
 
@@ -256,6 +281,11 @@ class CallSettingsController extends Notifier<CallSettings> {
         voiceprintLevel: VoiceprintLevel.values.firstWhere(
           (l) => l.wire == json['voiceprintLevel'],
           orElse: () => VoiceprintLevel.normal,
+        ),
+        voiceprintBias: ((json['voiceprintBias'] as num?)?.toDouble() ?? 0).clamp(-0.20, 0.20),
+        voiceprintMic: VoiceprintMic.values.firstWhere(
+          (m) => m.wire == json['voiceprintMic'],
+          orElse: () => VoiceprintMic.normal,
         ),
       );
     } on Object {
@@ -302,6 +332,8 @@ class CallSettingsController extends Notifier<CallSettings> {
         'voiceprintOthers': next.voiceprintOthers,
         'voiceprintWake': next.voiceprintWake,
         'voiceprintLevel': next.voiceprintLevel.wire,
+        'voiceprintBias': next.voiceprintBias,
+        'voiceprintMic': next.voiceprintMic.wire,
       }),
     );
   }

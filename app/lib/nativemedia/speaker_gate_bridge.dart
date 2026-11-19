@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../speech/sherpa_speaker_embedder.dart';
+import '../speech/speech_audio.dart' show VoiceprintMic;
 
 import '../speech/voiceprint_store.dart' show VoiceProfile;
 
@@ -61,8 +62,11 @@ class VoiceprintChannel {
     required String level,
     required List<VoiceProfile> profiles,
     bool wake = false,
+    double bias = 0,
+    /// 采集电平档位；null 表示"别动原生的当前值"。
+    VoiceprintMic? mic,
   }) async {
-    final accept = acceptFor(level, profiles.length);
+    final accept = acceptFor(level, profiles.length) + bias;
     final reject = accept - _band;
     try {
       await _channel.invokeMethod<void>('voiceprintConfigure', {
@@ -72,6 +76,10 @@ class VoiceprintChannel {
         'wake': wake,
         'accept': accept,
         'reject': reject,
+        // 原生会按人数自己重算一遍，所以偏移量必须一起送过去，
+        // 只改上面这两个数不生效。
+        'bias': bias,
+        if (mic != null) 'silence': mic.wireArgs,
         'profiles': [
           for (final p in profiles)
             {'id': p.id, 'vector': Float32List.fromList(p.vector)},

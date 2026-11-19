@@ -19203,6 +19203,21 @@ class L10nZh extends L10n {
   String get speechVoiceprintStrict => '严格';
 
   @override
+  String get speechVoiceprintMic => '这台机器收音大小';
+
+  @override
+  String get speechVoiceprintMicHint => '说话时进麦克风的声音偏小就往下调，否则声纹认不出你';
+
+  @override
+  String get speechVoiceprintMicNormal => '正常';
+
+  @override
+  String get speechVoiceprintMicQuiet => '偏小';
+
+  @override
+  String get speechVoiceprintMicFaint => '很小';
+
+  @override
   String get speechVoiceprintOffHint => '打开上面的开关后，才能录入声音';
 
   @override

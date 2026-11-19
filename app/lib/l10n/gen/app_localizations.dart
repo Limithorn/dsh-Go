@@ -35324,6 +35324,36 @@ abstract class L10n {
   /// **'严格'**
   String get speechVoiceprintStrict;
 
+  /// No description provided for @speechVoiceprintMic.
+  ///
+  /// In zh, this message translates to:
+  /// **'这台机器收音大小'**
+  String get speechVoiceprintMic;
+
+  /// No description provided for @speechVoiceprintMicHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'说话时进麦克风的声音偏小就往下调，否则声纹认不出你'**
+  String get speechVoiceprintMicHint;
+
+  /// No description provided for @speechVoiceprintMicNormal.
+  ///
+  /// In zh, this message translates to:
+  /// **'正常'**
+  String get speechVoiceprintMicNormal;
+
+  /// No description provided for @speechVoiceprintMicQuiet.
+  ///
+  /// In zh, this message translates to:
+  /// **'偏小'**
+  String get speechVoiceprintMicQuiet;
+
+  /// No description provided for @speechVoiceprintMicFaint.
+  ///
+  /// In zh, this message translates to:
+  /// **'很小'**
+  String get speechVoiceprintMicFaint;
+
   /// No description provided for @speechVoiceprintOffHint.
   ///
   /// In zh, this message translates to:

@@ -80,9 +80,9 @@ object Thresholds {
      * 对数关系。k 由 [PER_EXTRA] 定，保守取 0.045——5 人时比 1 人高约 0.072，
      * 与"每人把误接受压到 1/N"的量级相当。
      */
-    fun accept(level: Level, count: Int, gate: Gate = Gate.BARGE): Float {
+    fun accept(level: Level, count: Int, gate: Gate = Gate.BARGE, bias: Float = 0f): Float {
         val n = count.coerceAtLeast(1)
-        return (baseFor(level, gate) + PER_EXTRA * ln(n)).coerceAtMost(0.97f)
+        return (baseFor(level, gate) + PER_EXTRA * ln(n) + bias).coerceIn(0.05f, 0.97f)
     }
 
     /**
@@ -112,13 +112,13 @@ object Thresholds {
     }
 
     /** 拒绝线 = 接受线 − 带宽。落在 (reject, accept) 之间的一律 UNKNOWN。 */
-    fun reject(level: Level, count: Int, gate: Gate = Gate.BARGE): Float =
-        (accept(level, count, gate) - BAND).coerceAtLeast(0.0f)
+    fun reject(level: Level, count: Int, gate: Gate = Gate.BARGE, bias: Float = 0f): Float =
+        (accept(level, count, gate, bias) - BAND).coerceAtLeast(0.0f)
 
-    fun forCount(level: Level, count: Int): SpeakerGate.Cutoffs =
+    fun forCount(level: Level, count: Int, bias: Float = 0f): SpeakerGate.Cutoffs =
         SpeakerGate.Cutoffs(
-            accept = accept(level, count),
-            reject = reject(level, count),
+            accept = accept(level, count, bias = bias),
+            reject = reject(level, count, bias = bias),
         )
 
     /** 每多一个模板往上提的系数（对数空间）。 */

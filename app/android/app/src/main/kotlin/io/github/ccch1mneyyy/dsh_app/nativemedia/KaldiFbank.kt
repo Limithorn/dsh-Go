@@ -21,7 +21,7 @@ import kotlin.math.sqrt
  * 所有输入按 sherpa-onnx 的约定：[normalizeSamples] 为 true 时波形是 -1..1
  * 的 float（模型的 normalize_samples=1 是同一个意思）。
  */
-internal class KaldiFbank(
+class KaldiFbank(
     private val sampleRate: Int = 16_000,
     private val numBins: Int = 80,
     private val frameLengthMs: Double = 25.0,
@@ -30,7 +30,32 @@ internal class KaldiFbank(
     private val highFreq: Double = 0.0, // 0 = Nyquist
     private val preemph: Double = 0.97,
     private val energyFloor: Double = 1.0,
+    /**
+     * 判断"这段里有没有人说话"的三个数，都可调——因为采集电平天生跟着机器走。
+     *
+     * VOICE_COMMUNICATION + AEC 是对的（声纹要和通话同分布），可 AEC 削多少
+     * 各机不同：正常手机说话 RMS 约 -25dBFS，有的机器只有 -60dBFS，差 35dB。
+     * 写死一套数，换台机器就可能一个都判不出来（实测：那台机器真人说话帧
+     * 能量只有 1.4e-9，被 3e-6 的旧下限全部挡掉，声纹彻底失效）。
+     */
+    private val silence: Silence = Silence(),
 ) {
+    /**
+     * 静默检测的参数。
+     *
+     * [percentile] 取第几分位当"这段的底"。太小会撞上数字静默的平坦区
+     * （那里相邻分位几乎一样），太大又开始吃到人声。实测 p20–p60 都能用。
+     * [multiple] 是"比底高多少倍才算有人声"，4.0 ≈ +6dB。
+     * [absoluteFloor] 只在底本身趋近 0 时兜底，正常不该起作用。
+     * [voicedFraction] 要求多少比例的帧有声，才算"这段真有人在说"。
+     */
+    data class Silence(
+        val percentile: Double = 0.20,
+        val multiple: Double = 4.0,
+        val absoluteFloor: Double = 1e-10,
+        val voicedFraction: Double = 0.20,
+    )
+
     private val frameLength = (sampleRate * frameLengthMs / 1000.0).toInt()   // 400
     private val frameShift = (sampleRate * frameShiftMs / 1000.0).toInt()     // 160
     private val fftSize = nextPow2(frameLength)                               // 512
@@ -114,24 +139,27 @@ internal class KaldiFbank(
         // 上一版用 1e-4，真人说话也被挡掉了。改成"比这段最安静的帧高 6dB 以上"，
         // 静默时所有帧差不多平（数出来的很少），说话时会有明显的高帧。
         val sorted = rawEnergies.sortedArray()
-        val baseline = sorted[sorted.size / 5] // 最安静的两成，避开偶尔的咔哒声
-        // 相对 +6dB，再抬到绝对下限之上。
+        // 取第 [Silence.percentile] 分位当"这段的底"。原来写死 size/5（p20）。
+        val at = (sorted.size * silence.percentile).toInt().coerceIn(0, sorted.size - 1)
+        val baseline = sorted[at]
+        // 相对判断：比底高 [Silence.multiple] 倍才算有人声。
         //
-        // 下限不是摆设：通话里 AEC 会把开头削成近乎数字静默（实测 baseline 低到
-        // 3e-10），这时"相对 +6dB"等于没门槛，噪声全被算成有人说话——于是
-        // voiced/need 卡在线上来回摆，一时通过一时被挡。
-        // 3e-6 约合 -55dBFS，比正常语音低得多，但高于任何"被削平"的残渣。
-        val threshold = maxOf(baseline * 4.0, 3e-6)
+        // [Silence.absoluteFloor] 只为防底本身趋近 0（整段数字静默）时退化，
+        // 不该成为主门槛——它一旦高于真实语音电平，就会把每一帧都判成静默，
+        // embed 返回 null，声纹根本没有机会判（实测踩过，见 [Silence] 注释）。
+        val threshold = maxOf(baseline * silence.multiple, silence.absoluteFloor)
         var voiced = 0
         for (e in rawEnergies) if (e > threshold) voiced++
 
         // 诊断：真人说话时数出几帧、这段的底是多少。
         android.util.Log.i(
             "KaldiFbank",
-            "count=$count voiced=$voiced need=${maxOf(3, count / 5)} baseline=${"%.2e".format(baseline)}",
+            "count=$count voiced=$voiced need=${maxOf(3, (count * silence.voicedFraction).toInt())} " +
+                "baseline=${"%.2e".format(baseline)} p=${silence.percentile} x${silence.multiple} " +
+                "floor=${"%.0e".format(silence.absoluteFloor)}",
         )
-        // 有人声的帧不到两成，就当这段没人在说——返回 null，别拿噪声去比。
-        if (voiced < maxOf(3, count / 5)) return null
+        // 有人声的帧不到要求比例，就当这段没人在说——返回 null，别拿噪声去比。
+        if (voiced < maxOf(3, (count * silence.voicedFraction).toInt())) return null
 
         if (subtractMean) {
             val running = mean

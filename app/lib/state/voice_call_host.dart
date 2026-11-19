@@ -80,6 +80,8 @@ class VoiceCallHost extends ChangeNotifier {
       level: settings.voiceprintLevel.wire,
       profiles: settings.voiceprint ? profiles : const [],
       wake: settings.voiceprint && settings.voiceprintWake,
+      bias: settings.voiceprintBias,
+      mic: settings.voiceprintMic,
     );
   }
   String _title = '';

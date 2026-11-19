@@ -490,6 +490,22 @@ class _VoiceprintSection extends ConsumerWidget {
               ? (level) => unawaited(calls.edit((saved) => saved.copyWith(voiceprintLevel: level)))
               : null,
         ),
+        // 在「认得松严」之后：那个管"分数要多高才算我"，这个管"有没有人说话"。
+        // 两件事，前者再松也没用——采集电平不够，原生根本算不出向量。
+        SettingsSegmentTile<VoiceprintMic>(
+          key: const ValueKey('speech-voiceprint-mic'),
+          title: l10n.speechVoiceprintMic,
+          subtitle: l10n.speechVoiceprintMicHint,
+          segments: [
+            PillSegment(VoiceprintMic.normal, l10n.speechVoiceprintMicNormal),
+            PillSegment(VoiceprintMic.quiet, l10n.speechVoiceprintMicQuiet),
+            PillSegment(VoiceprintMic.faint, l10n.speechVoiceprintMicFaint),
+          ],
+          selected: call.voiceprintMic,
+          onChanged: on
+              ? (mic) => unawaited(calls.edit((saved) => saved.copyWith(voiceprintMic: mic)))
+              : null,
+        ),
       ],
     );
   }
