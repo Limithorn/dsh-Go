@@ -52,6 +52,9 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
   /// 结束时原生报回来的录音文件路径。
   List<String> _clips = const [];
 
+  /// 正在放第几段；-1 表示没在放。
+  int _playing = -1;
+
   /// 让 TTS 一直说下去：说完一句接下一句，直到停。
   ///
   /// 用长句拼出来的，所以不会在等下一句的间隙把扬声器"停下"——那个间隙里
@@ -141,6 +144,16 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
     _speakTimer = Timer(const Duration(seconds: 9), () {
       if (_running) unawaited(_nextSentence());
     });
+  }
+
+  Future<void> _playClip(int i) async {
+    if (_playing == i) {
+      await _voice.stop();
+      if (mounted) setState(() => _playing = -1);
+      return;
+    }
+    setState(() => _playing = i);
+    await _voice.play('screen-clip-$i', _clips[i]);
   }
 
   Future<void> _stop() async {
@@ -235,10 +248,18 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
           SettingsSection(
             title: '录音',
             children: [
-              for (final c in _clips)
+              for (var i = 0; i < _clips.length; i++)
                 SettingsTile(
-                  title: c.split('/').last,
-                  subtitle: '麦克风当时听到的原声，可回听判断到底因为什么',
+                  key: ValueKey('screen-clip-$i'),
+                  title: _clips[i].split('/').last,
+                  // 之前这里只有标题没有 onTap，所以点不动——看着像按钮，
+                  // 实际是块文字。现在点了就用同一套播放器放出来。
+                  subtitle: _playing == i ? '正在放…' : '点一下回听：麦克风当时听到的原声',
+                  trailing: Icon(
+                    _playing == i ? Icons.stop_circle_outlined : Icons.play_circle_outline,
+                    size: 20,
+                  ),
+                  onTap: () => unawaited(_playClip(i)),
                 ),
             ],
           ),

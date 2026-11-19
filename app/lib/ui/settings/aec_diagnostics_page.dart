@@ -28,16 +28,37 @@ class AecDiagnosticsPage extends ConsumerStatefulWidget {
   ConsumerState<AecDiagnosticsPage> createState() => _AecDiagnosticsPageState();
 }
 
-/// 一次量测的结果（三种配置各一次）。
-class _Matrix {
-  _Matrix({required this.vcNoAec, required this.vcAec, required this.vrNoAec, required this.sdk});
+/// 一种配置的回声残留。
+///
+/// [leak] = 播放时电平 − 静默时电平。这是唯一有意义的量：AEC 拿正在播放
+/// 的音频当参考去减，不放东西时它没有参考，测出来的只是底噪。
+class _One {
+  _One({required this.playing, required this.silent, required this.leak, required this.usable, this.aecOn});
 
-  final double vcNoAec;
-  final double vcAec;
-  final double vrNoAec;
+  final double playing;
+  final double silent;
+  final double leak;
+  final bool usable;
+  final bool? aecOn;
+
+  bool get ok => usable && leak < 10;
+  bool get bad => usable && leak >= 22;
+}
+
+class _Echo {
+  _Echo({required this.vcNoAec, required this.vcAec, required this.vrNoAec, required this.sdk});
+
+  final _One? vcNoAec;
+  final _One vcAec;
+  final _One vrNoAec;
   final int sdk;
 
-  double get cut => (vcNoAec <= -900 || vcAec <= -900) ? double.nan : vcNoAec - vcAec;
+  /// AEC 实际减少了多少回声：不开的漏量减去开的漏量。
+  double? get gain {
+    final a = vcNoAec;
+    if (a == null || !a.usable || !vcAec.usable) return null;
+    return a.leak - vcAec.leak;
+  }
 }
 
 class _AecDiagnosticsPageState extends ConsumerState<AecDiagnosticsPage> {
@@ -45,7 +66,7 @@ class _AecDiagnosticsPageState extends ConsumerState<AecDiagnosticsPage> {
 
   bool _busy = false;
   Map<Object?, Object?>? _report;
-  _Matrix? _matrix;
+  _Echo? _matrix;
   String? _note;
 
   @override
@@ -66,7 +87,8 @@ class _AecDiagnosticsPageState extends ConsumerState<AecDiagnosticsPage> {
       _note = null;
       _matrix = null;
     });
-    final m = await _channel.invokeMapMethod<Object?, Object?>('aecProbe', {'ms': 1200});
+    // 会放一段扫频音，音量拉到最大，持续约 8 秒。
+    final m = await _channel.invokeMapMethod<Object?, Object?>('aecEcho', {'ms': 1500});
     if (!mounted) return;
     if (m == null || m['error'] != null) {
       setState(() {
@@ -75,12 +97,35 @@ class _AecDiagnosticsPageState extends ConsumerState<AecDiagnosticsPage> {
       });
       return;
     }
+    _One? one(Object? raw) {
+      if (raw is! Map) return null;
+      final playing = (raw['playing'] as num?)?.toDouble() ?? -999;
+      final silent = (raw['silent'] as num?)?.toDouble() ?? -999;
+      final leak = (raw['leak'] as num?)?.toDouble() ?? -999;
+      return _One(
+        playing: playing,
+        silent: silent,
+        leak: leak,
+        usable: raw['usable'] == true && leak > -500,
+        aecOn: raw['aecOn'] as bool?,
+      );
+    }
+
+    final vcAec = one(m['vcAec']);
+    final vr = one(m['vrNoAec']);
+    if (vcAec == null || vr == null) {
+      setState(() {
+        _busy = false;
+        _note = '量测结果不完整';
+      });
+      return;
+    }
     setState(() {
       _busy = false;
-      _matrix = _Matrix(
-        vcNoAec: (m['vcNoAec'] as num?)?.toDouble() ?? -999,
-        vcAec: (m['vcAec'] as num?)?.toDouble() ?? -999,
-        vrNoAec: (m['vrNoAec'] as num?)?.toDouble() ?? -999,
+      _matrix = _Echo(
+        vcNoAec: one(m['vcNoAec']),
+        vcAec: vcAec,
+        vrNoAec: vr,
         sdk: (m['sdk'] as num?)?.toInt() ?? 0,
       );
     });
@@ -191,53 +236,41 @@ class _AecDiagnosticsPageState extends ConsumerState<AecDiagnosticsPage> {
         ),
         if (_matrix case final m?)
           SettingsSection(
-            title: '结果（dBFS）',
+            title: '结果',
             children: [
-              SettingsTile(title: '通话音源 · 不开 AEC', subtitle: '回声原本的样子', trailing: Text(_db(m.vcNoAec))),
-              SettingsTile(title: '通话音源 · 开 AEC', subtitle: 'AEC 削过之后', trailing: Text(_db(m.vcAec))),
-              SettingsTile(title: '识别音源 · 不开 AEC', subtitle: '不降噪，电平最高', trailing: Text(_db(m.vrNoAec))),
+              _row('通话音源 · 不开 AEC', m.vcNoAec, 'AEC 不介入，回声原样进来'),
+              _row('通话音源 · 开 AEC', m.vcAec, 'AEC 介入之后'),
+              _row('识别音源 · 不开 AEC', m.vrNoAec, '不降噪的一路，作对照'),
+            ],
+          ),
+        if (_matrix case final m? when m.gain != null)
+          SettingsSection(
+            title: 'AEC 起了多少作用',
+            children: [
               SettingsTile(
-                title: m.cut.isNaN ? 'AEC 削掉多少：量不出' : 'AEC 削掉 ${m.cut.toStringAsFixed(1)} dB',
-                subtitle: m.cut.isNaN
-                    ? null
-                    : (m.cut < 1
-                          ? '几乎没削：AEC 没起作用'
-                          : (m.cut > 6 ? '削得明显，AEC 有效' : '削得不多，可能不够')),
+                title: '回声减少 ${m.gain!.toStringAsFixed(1)} dB',
+                subtitle: m.gain! < 3
+                    ? '几乎没减少——AEC 在这台机器上没起作用'
+                    : (m.gain! < 10
+                          ? '减少了一点，但不够：外放时自己播的声音仍会明显漏回来'
+                          : '减少明显，AEC 在工作'),
                 trailing: Icon(
-                  m.cut.isNaN
-                      ? Icons.help_outline
-                      : (m.cut >= 1 ? Icons.check_circle_outline : Icons.error_outline),
+                  m.gain! < 3 ? Icons.error_outline : Icons.check_circle_outline,
                   size: 20,
-                  color: m.cut.isNaN
-                      ? scheme.onSurfaceVariant
-                      : (m.cut >= 1 ? scheme.primary : scheme.error),
+                  color: m.gain! < 3 ? scheme.error : scheme.primary,
                 ),
               ),
             ],
           ),
-        if (_matrix case final m? when m.cut >= 1)
+        if (_matrix case final m?)
           SettingsSection(
             children: [
               SettingsTile(
-                title: '结论',
+                title: '怎么读',
                 subtitle:
-                    'AEC 在这台机器上是有效的（削掉 ${m.cut.toStringAsFixed(1)} dB）。'
-                    '如果外放还是被自己打断，问题不在 AEC，而在声纹判定这一环——'
-                    '去「实景测试」看播放时的分数是不是偏高，必要时把插话灵敏度往'
-                    '「很难被打断」调，或者调高识别灵敏度的严格度。',
-              ),
-            ],
-          ),
-        if (_matrix case final m? when m.cut < 1 && !m.cut.isNaN)
-          SettingsSection(
-            children: [
-              SettingsTile(
-                title: '结论',
-                subtitle:
-                    'AEC 基本没在削（差 ${m.cut.toStringAsFixed(1)} dB）。外放时自己的声音会'
-                    '原样进麦克风，被声纹判成"你自己"——这就是自打断的来源。\n'
-                    '可以考虑把「通话收音」换成"识别（不降噪）"：那一路电平高得多，'
-                    '但同样没有回声消除，需要靠插话灵敏度去挡。',
+                    '「漏」是播放时的电平减去静默时的电平——那是真正漏进麦克风的回声。\n'
+                    '小于 10 dB 说明基本没漏；大于 22 dB 说明等于没消。\n'
+                    '${m.gain == null ? '没测出可用的对比：可能某一次没采到声音。' : ''}',
               ),
             ],
           ),
@@ -265,5 +298,35 @@ class _AecDiagnosticsPageState extends ConsumerState<AecDiagnosticsPage> {
     ),
   );
 
-  static String _db(double v) => v <= -900 ? '打不开' : v.toStringAsFixed(1);
+  static String _db(double v) => switch (v) {
+    <= -997 => '没采到',
+    <= -900 => '打不开',
+    _ => v.toStringAsFixed(1),
+  };
+
+  /// 一行结果：漏量 + 播放/静默两个原始值。
+  Widget _row(String name, _One? o, String hint) {
+    final scheme = Theme.of(context).colorScheme;
+    if (o == null) {
+      return SettingsTile(title: name, subtitle: '没测到', trailing: const Text('—'));
+    }
+    if (!o.usable) {
+      return SettingsTile(
+        title: name,
+        subtitle: '没采到有效声音（播放 ${_db(o.playing)} / 静默 ${_db(o.silent)}）',
+        trailing: const Text('—'),
+      );
+    }
+    return SettingsTile(
+      title: name,
+      subtitle: '$hint　播放 ${_db(o.playing)} / 静默 ${_db(o.silent)}',
+      trailing: Text(
+        '漏 ${o.leak.toStringAsFixed(1)}',
+        style: TextStyle(
+          color: o.bad ? scheme.error : (o.ok ? scheme.primary : scheme.onSurfaceVariant),
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
 }
