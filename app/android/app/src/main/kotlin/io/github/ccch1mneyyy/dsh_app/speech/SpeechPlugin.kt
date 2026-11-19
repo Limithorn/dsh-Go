@@ -210,6 +210,12 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                     main.post { done.success(ok) }
                 }, "dsh-voiceprint-probe").apply { isDaemon = true }.start()
             }
+            "voiceprintDescribe" -> {
+                // 诊断页用：把原生此刻真正在用的门槛、静默参数、模型状态都报上去。
+                // 和设置页那份比对，就知道"改了的设置有没有送到原生"。
+                Voiceprint.warmUp(context.assets)
+                result.success(Voiceprint.describe())
+            }
             "voiceprintEmbed" -> {
                 val samples = call.argument<FloatArray>("samples")
                 if (samples == null) {

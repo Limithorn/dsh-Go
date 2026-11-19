@@ -214,7 +214,47 @@ class VoiceprintChannel {
     }
   }
 
-  static const _band = 0.08;
+  /// 同一段时间分别用三种音源录 1.5 秒，返回各自的峰值 dBFS。
+  ///
+  /// 用来回答"是不是 AEC 在吃声音"：通话音源和原始麦克风差 20dB 以上，
+  /// 说明降噪/AEC 拿掉了太多，"要喊才行"就是这么来的。
+  /// 打不开的音源返回 −999，初始化失败返回 −998。
+  Future<Map<String, double>> probeSources() async {
+    try {
+      final raw = await _channel.invokeMethod<Map<Object?, Object?>>('voiceprintProbe');
+      if (raw == null) return const {};
+      return {
+        for (final e in raw.entries) '${e.key}': (e.value as num?)?.toDouble() ?? -999,
+      };
+    } on PlatformException {
+      return const {};
+    } on MissingPluginException {
+      return const {};
+    }
+  }
+
+  /// 原生此刻的声纹状态：门槛、静默参数、模型是否就绪。
+  ///
+  /// 诊断页要用。和设置页那份不同——这里读的是**原生真正在用的值**，
+  /// 不是 Dart 算出来的副本。两者对不上，就说明配置没送到原生。
+  Future<Map<String, Object?>?> describe() async {
+    try {
+      final raw = await _channel.invokeMethod<Map<Object?, Object?>>('voiceprintDescribe');
+      if (raw == null) return null;
+      return raw.map((k, v) => MapEntry('$k', v));
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  /// accept 与 reject 之间的带宽（不确定带）。
+  static const band = 0.08;
+
+  // 内部沿用旧名字，少改调用点。
+  // ignore: constant_identifier_names
+  static const _band = band;
 
   /// 与 Kotlin 侧 `Thresholds.accept` 同一条曲线，两边必须一致。
   ///
