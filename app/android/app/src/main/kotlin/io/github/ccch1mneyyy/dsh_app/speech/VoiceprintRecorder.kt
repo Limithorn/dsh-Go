@@ -144,6 +144,31 @@ internal object VoiceprintRecorder {
         floor = Double.NaN
         seeded = 0
         val buffer = ShortArray(320) // 20ms
+        // 丢掉起音瞬态，别让它进模板。
+        //
+        // AudioRecord 启动后的前 100~200ms 有一段强瞬态（实测起手 -35.6dB
+        // 然后急降）。之前这段和说话一起进了模板，于是模板开头带着一段
+        // 宽带"启动噪声"。
+        //
+        // 后果不是"模型不准"，而是：判定时如果窗口开头也有类似的启动瞬态
+        // （比如实景测试刚启动），两边都含这段宽带噪声，余弦就被拉高——
+        // 实测第一个窗口 0.76、之后 0.22，差的就是这个。
+        //
+        // 丢 250ms：够盖住瞬态，又不至于吃掉说话的开头（提示音之后人才开口）。
+        val warmTarget = RATE * 250 / 1000
+        var warm = 0
+        while (warm < warmTarget && running) {
+            val n = try {
+                r.read(buffer, 0, buffer.size)
+            } catch (_: Exception) {
+                break
+            }
+            if (n > 0) {
+                warm += n
+            } else {
+                break
+            }
+        }
         thread = Thread({
             while (running) {
                 val n = try {
