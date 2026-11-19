@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.res.AssetManager
 import android.util.Log
 import io.github.ccch1mneyyy.dsh_app.nativemedia.CampplusEmbedder
+import io.github.ccch1mneyyy.dsh_app.nativemedia.KaldiFbank
 import io.github.ccch1mneyyy.dsh_app.nativemedia.SpeakerGate
 import io.github.ccch1mneyyy.dsh_app.nativemedia.Thresholds
 import java.nio.ByteBuffer
@@ -33,6 +34,27 @@ object Voiceprint {
     @Volatile var allowOthers: Boolean = true
     @Volatile var level: Thresholds.Level = Thresholds.Level.NORMAL
 
+    /**
+     * 在这台机器上再微调多少。
+     *
+     * 三档基线是按"正常手机"定的，可 AEC 削掉多少分跟机型、麦克风、外壳都有关：
+     * 同一句"是我"，有的机器 0.7、有的 0.5。这个偏移量由设置页给出（见
+     * 「测一下，给我个建议」），也允许手动拖。0 表示完全按档位算。
+     */
+    @Volatile var bias: Float = 0f
+
+    /**
+     * 静默检测的参数（"这段里到底有没有人说话"）。
+     *
+     * 采集电平跟着机器走：VOICE_COMMUNICATION + AEC 是正确的（声纹要和通话同
+     * 分布），但不同机器被削掉的幅度差很多——实测有一台机器真人说话的帧能量
+     * 只有 1.4e-9，旧代码写死 3e-6 的绝对门限，于是每一帧都判成静默，embed
+     * 返回 null，声纹彻底失效（表现："谁都打断不了"）。
+     *
+     * 所以这三个数交给设置页，随机器调。
+     */
+    @Volatile var silence: KaldiFbank.Silence = KaldiFbank.Silence()
+
     /** 唤醒也认声音。与 [enabled] 分开：通话和唤醒是两个独立的闸。 */
     @Volatile var wake: Boolean = false
 
@@ -44,8 +66,8 @@ object Voiceprint {
     /** 当前门槛；人数变了要跟着变（去人后门槛回落）。 */
     fun cutoffs(gate: Thresholds.Gate = Thresholds.Gate.BARGE): SpeakerGate.Cutoffs {
         val n = profiles.get().size
-        val accept = Thresholds.accept(level, n, gate)
-        val reject = Thresholds.reject(level, n, gate)
+        val accept = Thresholds.accept(level, n, gate, bias)
+        val reject = Thresholds.reject(level, n, gate, bias)
         // 唤醒自己有个开关；通话看总开关。两者都用同一份模板。
         val on = if (gate == Thresholds.Gate.WAKE) wake else enabled
         return SpeakerGate.Cutoffs(
@@ -85,22 +107,57 @@ object Voiceprint {
         level: Thresholds.Level,
         list: List<SpeakerGate.Profile>?,
         wake: Boolean = false,
+        bias: Float = 0f,
+        silence: KaldiFbank.Silence? = null,
     ) {
         this.enabled = enabled
         this.allowOthers = allowOthers
         this.level = level
         this.wake = wake
+        this.bias = bias
         list?.let { profiles.set(it) }
+        // 静默参数变了就得换一份 embedder：它建 fbank 时把参数拷了进去，
+        // 改字段不生效。模型只有 28MB，重建一次比留着旧的门限划算。
+        if (silence != null && silence != this.silence) {
+            this.silence = silence
+            refreshEmbedder()
+        }
     }
+
+    /**
+     * 按当前的 [silence] 重建 embedder。
+     *
+     * 模型还没加载完、或已经标记为不可用时什么都不做——那种情况由 [warmUp]
+     * 负责，它会读到最新的 [silence]。
+     */
+    private fun refreshEmbedder() {
+        val assets = warmAssets ?: return
+        if (blocked) return
+        Thread({
+            try {
+                val bytes = assets.open("speech/$MODEL").use { it.readBytes() }
+                val next = CampplusEmbedder(bytes, silence)
+                embedder?.close()
+                embedder = next
+                Log.i(TAG, "CAM++ reloaded with silence p=${silence.percentile} x${silence.multiple}")
+            } catch (e: Exception) {
+                Log.w(TAG, "reload with new silence failed; keeping the old one", e)
+            }
+        }, "dsh-speaker-reload").apply { isDaemon = true }.start()
+    }
+
+    /** [warmUp] 拿到的 AssetManager，重建 embedder 时还要用。 */
+    @Volatile private var warmAssets: AssetManager? = null
 
     /** 后台加载模型；调用方不阻塞。 */
     fun warmUp(assets: AssetManager) {
         if (embedder != null || loading || blocked) return
+        warmAssets = assets
         loading = true
         Thread({
             try {
                 val bytes = assets.open("speech/$MODEL").use { it.readBytes() }
-                embedder = CampplusEmbedder(bytes)
+                embedder = CampplusEmbedder(bytes, silence)
                 Log.i(TAG, "CAM++ loaded, dim=${embedder?.dimension}")
             } catch (e: Exception) {
                 blocked = true

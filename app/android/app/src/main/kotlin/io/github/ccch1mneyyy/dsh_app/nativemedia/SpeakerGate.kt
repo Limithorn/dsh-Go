@@ -150,6 +150,12 @@ class SpeakerGate(
      */
     private fun dumpWindow(audio: FloatArray) {
         if (!DUMP || dumped >= MAX_DUMPS) return
+        // 只留"这段真的有人在说"的——静默窗口占绝大多数，留着它们只会把
+        // 有用的那几条挤掉（实测：想看的几句全被 20 份静默覆盖了）。
+        var sum = 0.0
+        for (v in audio) sum += v * v
+        val rms = kotlin.math.sqrt(sum / audio.size)
+        if (rms < DUMP_MIN_RMS) return
         dumped++
         try {
             // 落到外部存储：release 版不能 run-as，私有目录里的东西拿不出来。
@@ -283,7 +289,15 @@ class SpeakerGate(
 
         /** 把判定用的音频存成 wav（排查用）。 */
         const val DUMP = true
-        const val MAX_DUMPS = 20
+        const val MAX_DUMPS = 30
+
+        /**
+         * 低于这个 RMS 的窗口不存。
+         *
+         * 取 −60dBFS（1e-3）偏松：实测这台机器说话时整段 RMS 在 −60 上下，
+         * 再紧就一条都存不到了。静默窗口在 −85 以下，挡得住。
+         */
+        const val DUMP_MIN_RMS = 1e-3
         const val RATE = 16000
 
         /** 单模板默认门槛（P0 实测前先用这些值；只影响判定，不动任何现有阈值）。 */

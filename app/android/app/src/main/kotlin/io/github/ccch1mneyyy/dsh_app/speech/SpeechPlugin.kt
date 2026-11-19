@@ -178,6 +178,19 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                         else -> Thresholds.Level.NORMAL
                     },
                     list = list,
+                    // 这台机器上的微调，由设置页给（可以是手动拖的，也可以是
+                    // 「测一下」算出来的建议值）。
+                    bias = (call.argument<Double>("bias") ?: 0.0).toFloat().coerceIn(-0.2f, 0.2f),
+                    // 静默检测随机器调。不传就沿用当前值（null 表示"别动"）。
+                    silence = call.argument<Map<String, Any?>>("silence")?.let { m ->
+                        val d = io.github.ccch1mneyyy.dsh_app.nativemedia.KaldiFbank.Silence()
+                        io.github.ccch1mneyyy.dsh_app.nativemedia.KaldiFbank.Silence(
+                            percentile = (m["percentile"] as? Number)?.toDouble()?.coerceIn(0.02, 0.80) ?: d.percentile,
+                            multiple = (m["multiple"] as? Number)?.toDouble()?.coerceIn(1.5, 30.0) ?: d.multiple,
+                            absoluteFloor = (m["absoluteFloor"] as? Number)?.toDouble()?.coerceIn(0.0, 1e-2) ?: d.absoluteFloor,
+                            voicedFraction = (m["voicedFraction"] as? Number)?.toDouble()?.coerceIn(0.05, 0.60) ?: d.voicedFraction,
+                        )
+                    },
                 )
                 // 门槛随人数重算：人来人往之后不能沿用旧值（5 人删到 1 人要回落）。
                 capture?.currentGate()?.let { g -> (g as? SpeakerGate)?.configure(Voiceprint.cutoffs()) }

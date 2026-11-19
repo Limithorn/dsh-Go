@@ -21612,6 +21612,22 @@ class L10nEn extends L10n {
   String get speechVoiceprintStrict => 'Strict';
 
   @override
+  String get speechVoiceprintMic => 'How loud your mic is';
+
+  @override
+  String get speechVoiceprintMicHint =>
+      'Turn this down if your voice reaches the mic quietly; otherwise voiceprint cannot recognise you';
+
+  @override
+  String get speechVoiceprintMicNormal => 'Normal';
+
+  @override
+  String get speechVoiceprintMicQuiet => 'Quiet';
+
+  @override
+  String get speechVoiceprintMicFaint => 'Very quiet';
+
+  @override
   String get speechVoiceprintOffHint => 'Turn the switch above on to record a voice';
 
   @override

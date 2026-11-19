@@ -15,14 +15,18 @@ import kotlin.math.sqrt
  * [batch, 192]。这里负责把 fbank 拼成张量、跑一次、做 L2 归一化——归一化后
  * 两个向量的点积就是余弦相似度，比对时不必再算长度。
  */
-internal class CampplusEmbedder(bytes: ByteArray) : AutoCloseable {
+internal class CampplusEmbedder(
+    bytes: ByteArray,
+    /** 静默检测的参数；设置页改了就换一份新的 embedder（见 [Voiceprint.setSilence]）。 */
+    private val silence: KaldiFbank.Silence = KaldiFbank.Silence(),
+) : AutoCloseable {
     private val env = OrtEnvironment.getEnvironment()
     private val model: OrtSession = OrtSession.SessionOptions().use { options ->
         options.setIntraOpNumThreads(1)
         options.setInterOpNumThreads(1)
         env.createSession(bytes, options)
     }
-    private val fbank = KaldiFbank()
+    private val fbank = KaldiFbank(silence = silence)
 
     val dimension: Int = 192
 

@@ -38,7 +38,13 @@ class _VoiceprintDiagnosticsPageState extends ConsumerState<VoiceprintDiagnostic
   String? _note;
 
   /// 刚录这一句的结果。
-  ({double score, VoiceprintKind kind, double? short})? _last;
+  ({double score, VoiceprintKind kind, double? short, double? suggest})? _last;
+
+  /// 建议门槛比实测分低多少。
+  ///
+  /// 0.08：同一句"是我"，换个句子、换个距离，实测分会上下浮动这么大
+  /// （看这一页下面的判定记录就知道）。贴着实测分设门槛，下一句就被挡。
+  static const _suggestMargin = 0.08;
 
   @override
   void dispose() {
@@ -212,7 +218,18 @@ class _VoiceprintDiagnosticsPageState extends ConsumerState<VoiceprintDiagnostic
           ? null
           : VoiceprintStore.closest(profiles, short).score;
       if (mounted) {
-        setState(() => _last = (score: score, kind: kind, short: shortScore));
+        setState(
+          () => _last = (
+            score: score,
+            kind: kind,
+            short: shortScore,
+            // 建议门槛：拿**短窗口**那个分数当依据，因为它才是通话里真正
+            // 参与判定的长度。比它低 0.08，留一句之差（换个句子分数会抖）。
+            //
+            // 两个都要在：短窗口没有就算了，只有整段的数不能代表通话。
+            suggest: shortScore == null ? null : (shortScore - _suggestMargin).clamp(0.05, 0.95),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);

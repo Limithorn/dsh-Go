@@ -131,6 +131,65 @@ enum VoiceprintLevel {
   final String wire;
 }
 
+/// 这台机器收进来的声音有多大——决定"有没有人在说"那条线画在哪。
+///
+/// 为什么需要这个：通话采集走 VOICE_COMMUNICATION + AEC（对的，声纹要和通话
+/// 同分布），但 AEC 削掉多少跟机型、麦克风、外壳都有关。正常手机说话 RMS 约
+/// −25dBFS，实测有的机器只有 −60dBFS，差 35dB。差这么多时，一条按正常电平
+/// 定的绝对门限会把每一帧都判成静默，embed 返回 null，声纹根本没机会判。
+///
+/// 三档对应原生 `KaldiFbank.Silence` 的四组参数：
+/// - [percentile] 取第几分位当"这段的底"
+/// - [multiple] 比底高多少倍才算有人声（4.0 ≈ +6dB）
+/// - [absoluteFloor] 只在底趋近 0 时兜底，正常不干预
+/// - [voicedFraction] 要求多少比例的帧有声
+///
+/// 默认档 [normal] 就是原来的 0.20 / 4.0 / 1e-10 / 0.20，没换设备的人不受影响。
+enum VoiceprintMic {
+  /// 正常手机：说话能到 −25dBFS 上下。
+  normal('normal', percentile: 0.20, multiple: 4.0, absoluteFloor: 1e-10, voicedFraction: 0.20),
+
+  /// 收得偏小：说话只有 −45dBFS 上下（旧手机的窄麦、厚壳、贴脸说的膜）。
+  quiet('quiet', percentile: 0.30, multiple: 3.0, absoluteFloor: 1e-11, voicedFraction: 0.15),
+
+  /// 收得极小：说话只有 −60dBFS 上下（AEC 削得狠的机器，就是实测那台）。
+  ///
+  /// 门限压到 1e-12：实测这种机器的静默底在 1.2e-10 ~ 3.3e-10，
+  /// 而人声帧能到 1.4e-9 以上，绝对下限只要不高于底就完全交给相对判断。
+  faint('faint', percentile: 0.30, multiple: 2.5, absoluteFloor: 1e-12, voicedFraction: 0.12);
+
+  const VoiceprintMic(
+    this.wire, {
+    required this.percentile,
+    required this.multiple,
+    required this.absoluteFloor,
+    required this.voicedFraction,
+  });
+
+  /// 传给原生的档位名。
+  final String wire;
+
+  /// 取第几分位当"这段的底"。
+  final double percentile;
+
+  /// 比底高多少倍才算有人声。
+  final double multiple;
+
+  /// 绝对下限，只防底趋近 0。
+  final double absoluteFloor;
+
+  /// 要有多少比例的帧有声，才算"这段真有人在说"。
+  final double voicedFraction;
+
+  /// 交给原生的那张表。
+  Map<String, Object?> get wireArgs => {
+    'percentile': percentile,
+    'multiple': multiple,
+    'absoluteFloor': absoluteFloor,
+    'voicedFraction': voicedFraction,
+  };
+}
+
 enum CallPause {
   quick(Duration.zero),
   normal(Duration(milliseconds: 400)),
