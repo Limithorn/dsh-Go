@@ -25,6 +25,23 @@ abstract final class AppInfo {
     return displayVersion;
   }
 
+  /// 这一版是怎么打出来的，由 `tool/build_apk.sh` 编进来。
+  ///
+  /// 版本号本身是常量（`1.2.0+1` 打了三十遍都一样），装到手机上根本分不清
+  /// 跑的是哪一个。这个名字带着提交哈希和时间，写在诊断页最上面。
+  ///
+  /// 手工 `flutter build` 时这三个都为空，[buildLabel] 会退回版本号。
+  static const buildName = String.fromEnvironment('DSH_BUILD_NAME');
+  static const buildCommit = String.fromEnvironment('DSH_BUILD_COMMIT');
+  static const buildTime = String.fromEnvironment('DSH_BUILD_TIME');
+
+  /// 诊断页顶上那一行。
+  static String get buildLabel {
+    if (buildName.isNotEmpty) return buildName;
+    // 没走脚本时至少把版本号显示出来，别让人以为这行是空的。
+    return displayVersion;
+  }
+
   /// "1.0.0 (1)" for display.
   static String get displayVersion {
     final parts = version.split('+');
