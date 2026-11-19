@@ -20116,7 +20116,7 @@ class L10nZh extends L10n {
   String get speechCallBargeNormal => '标准';
 
   @override
-  String get speechCallBargeGuarded => '防误触';
+  String get speechCallBargeGuarded => '不易被打断';
 
   @override
   String get speechCallSpoken => '口语回答';
@@ -20450,6 +20450,9 @@ class L10nZh extends L10n {
   String get speechVoiceprintStrict => '严格';
 
   @override
+  String get speechVoiceprintVeryStrict => '最严';
+
+  @override
   String get speechVoiceprintMic => '这台机器收音大小';
 
   @override
@@ -20745,10 +20748,10 @@ class L10nZh extends L10n {
   String get speechVoiceprintOthersHint2 => '旁人说话也能打断，只是她会慢一拍；关掉就只有录过的人能打断';
 
   @override
-  String get speechCallBargeResistant => '更防误触';
+  String get speechCallBargeResistant => '很难被打断';
 
   @override
-  String get speechCallBargeStubborn => '最防误触';
+  String get speechCallBargeStubborn => '几乎不被打断';
 
   @override
   String get speechVoiceprintRetryThis => '重录这一段';

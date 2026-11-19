@@ -66,6 +66,14 @@ object Thresholds {
         LOOSE(0.40f),
         NORMAL(0.50f),
         STRICT(0.60f),
+
+        /**
+         * 最严：只认"非常像"的。
+         *
+         * 给多人共用一台机器、或者旁人声音和自己接近的场景。代价是本人说轻
+         * 一点、隔得远一点就会被挡在外面——必须说得清楚。
+         */
+        VERY_STRICT(0.70f),
     }
 
     /** 不确定带宽：YOU 与 OTHER 之间留一条带子，落在里面的算 UNKNOWN（不切断）。 */
@@ -97,17 +105,20 @@ object Thresholds {
             Level.LOOSE -> 0.40f
             Level.NORMAL -> 0.50f
             Level.STRICT -> 0.60f
+            Level.VERY_STRICT -> 0.70f
         }
         // 没有播放、没有 AEC，音频和注册时接近：可以要求到 0.65 起。
         Gate.WAKE -> when (level) {
             Level.LOOSE -> 0.60f
             Level.NORMAL -> 0.70f
             Level.STRICT -> 0.80f
+            Level.VERY_STRICT -> 0.90f
         }
         Gate.TURN -> when (level) {
             Level.LOOSE -> 0.50f
             Level.NORMAL -> 0.58f
             Level.STRICT -> 0.68f
+            Level.VERY_STRICT -> 0.76f
         }
     }
 

@@ -253,6 +253,16 @@ class CallSettingsController extends Notifier<CallSettings> {
   static const _key = 'speech_call_v1';
   late Future<void> _loaded;
 
+  /// 声纹设置变了要通知谁。
+  ///
+  /// 用钩子而不是直接 import VoiceCallHost：那边已经 import 了本文件，
+  /// 反过来再 import 会绕成环。这里只留一个口子，由 App 启动时填上。
+  ///
+  /// 为什么要有：声纹的配置只在"通话开始那一刻"推给原生，设置页改完不进
+  /// 通话就永远送不到——诊断页上显示"设置 0.40 / 原生 0.50"，看着像开关
+  /// 坏了，实际是压根没推。这是实测踩过的。
+  static void Function(CallSettings previous, CallSettings next)? onVoiceprintChanged;
+
   @override
   CallSettings build() {
     _loaded = _load();
@@ -314,7 +324,17 @@ class CallSettingsController extends Notifier<CallSettings> {
   }
 
   Future<void> _keep(CallSettings next) async {
+    final previous = state;
     state = next;
+    // 只在这几个字段真的变了时才通知：别的一个改动也常常走到这里。
+    if (previous.voiceprint != next.voiceprint ||
+        previous.voiceprintOthers != next.voiceprintOthers ||
+        previous.voiceprintWake != next.voiceprintWake ||
+        previous.voiceprintLevel != next.voiceprintLevel ||
+        previous.voiceprintBias != next.voiceprintBias ||
+        previous.voiceprintMic != next.voiceprintMic) {
+      onVoiceprintChanged?.call(previous, next);
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
       _key,

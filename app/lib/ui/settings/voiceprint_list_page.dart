@@ -7,6 +7,7 @@ import '../../l10n/l10n.dart';
 import '../../speech/voiceprint_store.dart';
 import '../shell/page_frame.dart';
 import '../settings/settings_widgets.dart';
+import 'screen_test_page.dart';
 import 'speech_diagnostics_page.dart';
 import 'speech_self_test_page.dart';
 import 'voiceprint_diagnostics_page.dart';
@@ -92,6 +93,16 @@ class VoiceprintListPage extends ConsumerWidget {
                 subtitle: '不用打电话，逐项跑一遍看哪一环断了',
                 onTap: () => unawaited(Navigator.of(context).push(
                   MaterialPageRoute<void>(builder: (_) => const SpeechSelfTestPage()),
+                )),
+              ),
+              // 上面几页都是静音条件下测的。自打断和插话困难只在扬声器
+              // 真的在响时才出现，必须有一个放声音来测的地方。
+              SettingsTile(
+                key: const ValueKey('speech-screen-test'),
+                title: '实景测试',
+                subtitle: '我说话的时候你插话，看能不能打断；录音可回听',
+                onTap: () => unawaited(Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const ScreenTestPage()),
                 )),
               ),
             ],

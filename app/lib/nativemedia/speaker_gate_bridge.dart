@@ -264,6 +264,7 @@ class VoiceprintChannel {
     final base = switch (level) {
       'loose' => 0.40,
       'strict' => 0.60,
+      'veryStrict' => 0.70,
       _ => 0.50,
     };
     final n = count < 1 ? 1 : count;

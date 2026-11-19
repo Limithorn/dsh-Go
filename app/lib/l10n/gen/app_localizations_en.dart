@@ -21266,7 +21266,7 @@ class L10nEn extends L10n {
   String get speechCallBargeNormal => 'Normal';
 
   @override
-  String get speechCallBargeGuarded => 'Guarded';
+  String get speechCallBargeGuarded => 'Hard to interrupt';
 
   @override
   String get speechCallSpoken => 'Spoken answers';
@@ -21612,6 +21612,9 @@ class L10nEn extends L10n {
   String get speechVoiceprintStrict => 'Strict';
 
   @override
+  String get speechVoiceprintVeryStrict => 'Strictest';
+
+  @override
   String get speechVoiceprintMic => 'How loud your mic is';
 
   @override
@@ -21915,10 +21918,10 @@ class L10nEn extends L10n {
       'Others can interrupt too, she just takes a moment longer. Turn off and only enrolled voices can interrupt';
 
   @override
-  String get speechCallBargeResistant => 'Resistant';
+  String get speechCallBargeResistant => 'Harder to interrupt';
 
   @override
-  String get speechCallBargeStubborn => 'Stubborn';
+  String get speechCallBargeStubborn => 'Almost never interrupted';
 
   @override
   String get speechVoiceprintRetryThis => 'Say this one again';

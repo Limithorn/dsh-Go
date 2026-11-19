@@ -75,6 +75,20 @@ class SpeakerGate(
         val reject: Float = DEFAULT_REJECT,
         val allowOthers: Boolean = true,
         val enabled: Boolean = false,
+        /**
+         * 正在播放时，accept 额外抬高多少。
+         *
+         * 为什么需要：外放时 AI 自己的声音会从扬声器绕回麦克风。那段音频是
+         * "同一个人的声音、同一台手机的通道"——和你自己的模板天然很像，
+         * 分数经常落在 accept 线上，于是被判成"你自己"，自己打断自己。
+         *
+         * AEC 能削掉一部分，但削不干净（实测有的机器只差 11dB）。所以播放
+         * 时把线单独抬一点：真插话通常比漏回来的回声更响、更清楚，抬这一点
+         * 不会挡住真人，但能把"回声刚过线"那批挡住。
+         *
+         * 唤醒闸用不到这个（唤醒时不播放），保持 0。
+         */
+        val playingBoost: Float = 0f,
     )
 
     /** 落盘目录。由 SpeechPlugin 在启动时设一次；没设就不写。 */
@@ -260,14 +274,19 @@ class SpeakerGate(
             }
         }
         val c = cutoffs
+        // 播放时把线抬高一点，挡住"回声刚过线"那批。
+        // 单独一份局部变量，别改 cutoffs 本身——那是共享状态，改一次会影响
+        // 后续不播放时的判定。
+        val accept = (c.accept + if (playing) c.playingBoost else 0f).coerceAtMost(0.97f)
         val kind = when {
-            best >= c.accept -> Kind.YOU
+            best >= accept -> Kind.YOU
             best <= c.reject -> Kind.OTHER
             else -> Kind.UNKNOWN
         }
         android.util.Log.i(
             "SpeakerGate",
-            "score=$best kind=$kind accept=${c.accept} reject=${c.reject} n=${list.size}",
+            "score=$best kind=$kind accept=$accept reject=${c.reject} n=${list.size} " +
+                "playing=$playing boost=${if (playing) c.playingBoost else 0f}",
         )
         return Verdict(kind, best, bestId, overPlayback = playing, atFrame = atFrame)
     }

@@ -238,27 +238,13 @@ class _VoiceprintDiagnosticsPageState extends ConsumerState<VoiceprintDiagnostic
 
   /// 和 Kotlin 的 Thresholds.accept 同一条曲线。
   static ({double accept, double reject}) _cutoffs(CallSettings settings, int count) {
-    final base = switch (settings.voiceprintLevel) {
-      VoiceprintLevel.loose => 0.40,
-      VoiceprintLevel.strict => 0.60,
-      VoiceprintLevel.normal => 0.50,
-    };
-    final n = count < 1 ? 1 : count;
-    final accept = (base + 0.045 * _ln(n)).clamp(0.0, 0.97);
-    return (accept: accept, reject: accept - 0.08);
+    // 直接问那份唯一的实现，别在这里重抄一遍曲线——之前抄漏了 RELAXED 档，
+    // 加档位时编译器会发现，但两处数字早晚会走岔。
+    final accept = VoiceprintChannel.acceptFor(settings.voiceprintLevel.wire, count);
+    return (accept: accept, reject: accept - VoiceprintChannel.band);
   }
 
-  static double _ln(int n) {
-    if (n <= 1) return 0;
-    var x = (n - 1) / (n + 1);
-    var term = x;
-    var sum = 0.0;
-    for (var k = 1; k < 40; k += 2) {
-      sum += term / k;
-      term *= x * x;
-    }
-    return 2 * sum;
-  }
+
 
   static String _name(VoiceprintKind kind, L10n l10n) => switch (kind) {
     VoiceprintKind.you => l10n.speechVoiceprintDiagYou,
