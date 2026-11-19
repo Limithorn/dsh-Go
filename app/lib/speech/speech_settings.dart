@@ -148,6 +148,7 @@ class CallSettings {
     this.voiceprintOthers = true,
     this.voiceprintLevel = VoiceprintLevel.normal,
     this.voiceprintBias = 0,
+    this.callMicSource = CallMicSource.auto,
     this.voiceprintMic = VoiceprintMic.normal,
     this.voiceprintWake = false,
   });
@@ -204,6 +205,9 @@ class CallSettings {
   /// 单位就是余弦分：−0.20 ~ +0.20。0 表示完全按档位算。
   final double voiceprintBias;
 
+  /// 通话时用哪一路声音听人说话。见 [CallMicSource]。
+  final CallMicSource callMicSource;
+
   /// 这台机器收进来的声音有多大。
   ///
   /// 通话采集走 VOICE_COMMUNICATION + AEC——这是对的，声纹要和通话同分布——
@@ -229,6 +233,7 @@ class CallSettings {
     bool? voiceprintWake,
     VoiceprintLevel? voiceprintLevel,
     double? voiceprintBias,
+    CallMicSource? callMicSource,
     VoiceprintMic? voiceprintMic,
   }) => CallSettings(
     bargeIn: bargeIn ?? this.bargeIn,
@@ -245,6 +250,7 @@ class CallSettings {
     voiceprintWake: voiceprintWake ?? this.voiceprintWake,
     voiceprintLevel: voiceprintLevel ?? this.voiceprintLevel,
     voiceprintBias: voiceprintBias ?? this.voiceprintBias,
+    callMicSource: callMicSource ?? this.callMicSource,
     voiceprintMic: voiceprintMic ?? this.voiceprintMic,
   );
 }
@@ -293,11 +299,19 @@ class CallSettingsController extends Notifier<CallSettings> {
           orElse: () => VoiceprintLevel.normal,
         ),
         voiceprintBias: ((json['voiceprintBias'] as num?)?.toDouble() ?? 0).clamp(-0.20, 0.20),
+        callMicSource: CallMicSource.of(json['callMicSource'] as String?),
         voiceprintMic: VoiceprintMic.values.firstWhere(
           (m) => m.wire == json['voiceprintMic'],
           orElse: () => VoiceprintMic.normal,
         ),
       );
+      // 读盘后主动推一次。
+      //
+      // _keep 里那个通知只在"改设置"时响，而这里是把存着的值装进来——
+      // 装完就是当前状态，原生那边却还停在开机默认值。实测踩过：设置里
+      // 明明是 strict，自测页报"设置 0.631 / 原生 0.531"，两边都是 normal
+      // 以外的错觉，其实原生根本没收到过 strict。冷启动后必推一次才对得上。
+      onVoiceprintChanged?.call(state, state);
     } on Object {
       // Defaults for this run.
     }
@@ -332,7 +346,8 @@ class CallSettingsController extends Notifier<CallSettings> {
         previous.voiceprintWake != next.voiceprintWake ||
         previous.voiceprintLevel != next.voiceprintLevel ||
         previous.voiceprintBias != next.voiceprintBias ||
-        previous.voiceprintMic != next.voiceprintMic) {
+        previous.voiceprintMic != next.voiceprintMic ||
+        previous.callMicSource != next.callMicSource) {
       onVoiceprintChanged?.call(previous, next);
     }
     final prefs = await SharedPreferences.getInstance();
@@ -353,6 +368,7 @@ class CallSettingsController extends Notifier<CallSettings> {
         'voiceprintWake': next.voiceprintWake,
         'voiceprintLevel': next.voiceprintLevel.wire,
         'voiceprintBias': next.voiceprintBias,
+        'callMicSource': next.callMicSource.wire,
         'voiceprintMic': next.voiceprintMic.wire,
       }),
     );

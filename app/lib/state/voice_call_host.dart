@@ -355,6 +355,7 @@ VoiceCallController makeChatCallController(
         sensitivity: saved.sensitivity,
         voiceprint: saved.voiceprint,
         voiceprintOthers: saved.voiceprintOthers,
+        callMicSource: saved.callMicSource,
       );
     },
     permission: () async => await bridge.requestPermission() == VoicePermission.granted,

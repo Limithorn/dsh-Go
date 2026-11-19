@@ -20465,6 +20465,18 @@ class L10nZh extends L10n {
   String get speechVoiceprintMicQuiet => '偏小';
 
   @override
+  String get speechCallMicSource => '通话收音';
+
+  @override
+  String get speechCallMicAuto => '自动';
+
+  @override
+  String get speechCallMicComm => '通话';
+
+  @override
+  String get speechCallMicRecog => '识别';
+
+  @override
   String get speechVoiceprintMicFaint => '很小';
 
   @override

@@ -7,6 +7,7 @@ import '../../l10n/l10n.dart';
 import '../../speech/voiceprint_store.dart';
 import '../shell/page_frame.dart';
 import '../settings/settings_widgets.dart';
+import 'aec_diagnostics_page.dart';
 import 'screen_test_page.dart';
 import 'speech_diagnostics_page.dart';
 import 'speech_self_test_page.dart';
@@ -97,6 +98,15 @@ class VoiceprintListPage extends ConsumerWidget {
               ),
               // 上面几页都是静音条件下测的。自打断和插话困难只在扬声器
               // 真的在响时才出现，必须有一个放声音来测的地方。
+              // AEC 单独一页：它断在不同的层，值得分开看。
+              SettingsTile(
+                key: const ValueKey('aec-diagnostics'),
+                title: '回声消除诊断',
+                subtitle: 'AEC 开没开、断在哪一层（Android 13/14 差别很大）',
+                onTap: () => unawaited(Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const AecDiagnosticsPage()),
+                )),
+              ),
               SettingsTile(
                 key: const ValueKey('speech-screen-test'),
                 title: '实景测试',

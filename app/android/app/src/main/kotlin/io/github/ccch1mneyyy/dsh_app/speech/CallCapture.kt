@@ -82,6 +82,22 @@ class CallCapture(
     var echoCancelled = false
         private set
 
+    /** 这次采集的 AEC 详情，给诊断页看。 */
+    @Volatile internal var lastAec: AecSupport.Report? = null
+        private set
+
+    /**
+     * 通话采集用哪个音源。
+     *
+     * 默认 VOICE_COMMUNICATION：带 AEC，自己的播放声不会漏回来。
+     * 但有些机器（实测 Sony Xperia）在这条路上降噪过狠，说话峰值只有
+     * −74 dBFS，而同一个麦克风走 VOICE_RECOGNITION 是 −20.8——差 53 dB。
+     * 那种情况下宁可不要 AEC 也得能听见人说话。
+     *
+     * 由 Settings 里的「通话收音」控制，默认自动：启动时量一下，太低就换。
+     */
+    @Volatile var preferredSource: Int = MediaRecorder.AudioSource.VOICE_COMMUNICATION
+
     val active get() = record != null
 
     @SuppressLint("MissingPermission") // SpeechPlugin checks RECORD_AUDIO first.
@@ -91,7 +107,7 @@ class CallCapture(
         if (min <= 0) return false
         val r = runCatching {
             AudioRecord(
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                preferredSource,
                 RATE,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
@@ -102,19 +118,11 @@ class CallCapture(
             r.release()
             return false
         }
-        echoCancelled = false
-        if (runCatching { AcousticEchoCanceler.isAvailable() }.getOrDefault(false)) {
-            runCatching { AcousticEchoCanceler.create(r.audioSessionId) }.getOrNull()?.let { effect ->
-                effects += effect
-                echoCancelled = runCatching { effect.setEnabled(true) == AudioEffect.SUCCESS && effect.enabled }.getOrDefault(false)
-            }
-        }
-        if (runCatching { NoiseSuppressor.isAvailable() }.getOrDefault(false)) {
-            runCatching { NoiseSuppressor.create(r.audioSessionId) }.getOrNull()?.let { effect ->
-                effects += effect
-                runCatching { effect.setEnabled(true) }
-            }
-        }
+        // 交给 AecSupport：它把"能不能拿到对象""真的启用没有""音源自不带"
+        // 分开记，13 和 14 上表现不同也能说清楚断在哪一层。
+        val report = AecSupport.attach(r, effects)
+        echoCancelled = report.effective
+        lastAec = report
         val g = createGate(echoCancelled).also { it.pause = pause; it.bargeOffset = bargeOffset }
         val started = runCatching { r.startRecording() }.isSuccess && r.recordingState == AudioRecord.RECORDSTATE_RECORDING
         if (!started) {
