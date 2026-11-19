@@ -161,14 +161,26 @@ class KaldiFbank(
         // 有人声的帧不到要求比例，就当这段没人在说——返回 null，别拿噪声去比。
         if (voiced < maxOf(3, (count * silence.voicedFraction).toInt())) return null
 
+        // CMN：逐维减去本段的均值，再送模型。
+        //
+        // 这里原来只把均值算进 mean，然后直接返回——什么都没减。applyMean()
+        // 写好了却从没被调用过，CMN 实际上完全缺失。
+        //
+        // 后果不是"分数偏低"这么简单，而是**分数随音量乱飘**：模型的训练输入
+        // 是 CMN 之后的分布，喂原始 fbank 等于整体偏移，偏移量由这段有多响
+        // 决定。实测同一轮里 0.227 / 0.750 / 0.317 / 0.701 / 0.289 / 0.647
+        // 交替出现，安静窗口反而拿高分——就是因为它们的偏移恰好落进了
+        // 模型熟悉的那一片。
+        //
+        // 用段内均值（per-utterance CMN）而不是全局均值：全局均值要先跑一遍
+        // 语料才知道，而且换机器、换音源就失效；段内均值对音量、音源、
+        // 麦克风增益都不敏感，这也是 Kaldi 里 xvector 的标准做法。
         if (subtractMean) {
-            val running = mean
-            if (running == null) {
-                mean = DoubleArray(numBins).also { m ->
-                    for (fr in out) for (k in 0 until numBins) m[k] += fr[k]
-                    for (k in 0 until numBins) m[k] /= out.size
-                }
-            }
+            val m = DoubleArray(numBins)
+            for (fr in out) for (k in 0 until numBins) m[k] += fr[k]
+            for (k in 0 until numBins) m[k] /= out.size
+            mean = m
+            for (fr in out) for (k in 0 until numBins) fr[k] = (fr[k] - m[k]).toFloat()
         }
         return out.toTypedArray()
     }

@@ -112,6 +112,20 @@ class SpeakerGate(
      * 每轮 reset 时重新计。
      */
     private var warmupLeft = WARMUP_SAMPLES
+
+    /**
+     * 上一个窗口的结论。用来要求"连续两个都判成 YOU"才认。
+     *
+     * 为什么需要：回声的分数是飘的——实测同一轮里 0.227 / 0.750 / 0.317 /
+     * 0.701 / 0.289 / 0.647 交替出现，中间夹着一堆 0.2x。单看一个窗口，
+     * 碰到 0.7x 就打断，于是"放着放着突然被打断"。
+     *
+     * 真插话不一样：人开口之后会持续说，连续几个窗口都是高分。所以要求
+     * 连续确认，正好把"偶然一帧飘高"和"真的在说话"分开。
+     *
+     * 只对 YOU 生效，且只在播放时——不播放时没有回声，没必要多等一个窗口。
+     */
+    private var lastKind: Kind = Kind.UNKNOWN
     private var frames = 0L
     private var generation = 0L
     private var inFlight = false
@@ -326,11 +340,24 @@ class SpeakerGate(
         // 单独一份局部变量，别改 cutoffs 本身——那是共享状态，改一次会影响
         // 后续不播放时的判定。
         val accept = (c.accept + if (playing) c.playingBoost else 0f).coerceAtMost(0.97f)
-        val kind = when {
+        val rawKind = when {
             best >= accept -> Kind.YOU
             best <= c.reject -> Kind.OTHER
             else -> Kind.UNKNOWN
         }
+
+        // 播放时 YOU 要连续两个窗口才认。
+        //
+        // 上一个窗口不是 YOU 的话，这一次就算够了线也只记成 UNKNOWN——
+        // 它会被拦住（见 answer() 里 playing 的处理），等下一个窗口再确认。
+        // 真插话会连续命中，所以只多等 1.5 秒；回声那种飘上去的单帧过不去。
+        val kind = if (playing && rawKind == Kind.YOU && lastKind != Kind.YOU) {
+            android.util.Log.i("SpeakerGate", "hold: first YOU window (score=$best), waiting for confirm")
+            Kind.UNKNOWN
+        } else {
+            rawKind
+        }
+        lastKind = rawKind
         android.util.Log.i(
             "SpeakerGate",
             "score=$best kind=$kind accept=$accept reject=${c.reject} n=${list.size} " +
@@ -343,6 +370,7 @@ class SpeakerGate(
         inner.reset()
         filled = 0
         warmupLeft = WARMUP_SAMPLES
+        lastKind = Kind.UNKNOWN
         frames = 0
         latest = null
         delivered.set(null)
@@ -400,6 +428,16 @@ class SpeakerGate(
          */
         const val MIN_VOICED_FRACTION = 0.15
 
+        /**
+         * 说话电平的绝对下限（dBFS）。
+         *
+         * 低于这个就认为"这段里没有真正的说话"——哪怕它内部起伏够大。
+         * 原理见 voicedFraction 里的说明：弱信号算出的向量不可靠，分数会飘。
+         *
+         * −60dBFS：实测这台机器说话 p90 在 −30~−34，静音/过渡在 −77 以下。
+         */
+        const val MIN_VOICED_LEVEL_DB = -60.0
+
         /** 单模板默认门槛（P0 实测前先用这些值；只影响判定，不动任何现有阈值）。 */
         const val DEFAULT_ACCEPT = 0.72f
         const val DEFAULT_REJECT = 0.60f
@@ -437,8 +475,18 @@ class SpeakerGate(
             val sorted = db.clone()
             sorted.sort()
             val ref = sorted[((n - 1) * 0.9).toInt()]
-            // 91.2dBFS 是 16bit 的底：比这还低就是纯静音，不用看了。
-            if (ref < -91.0) return 0.0
+
+            // 绝对下限：说话电平本身得够响。
+            //
+            // 只看相对分布不够——实测抓到过 p90=-77.4dB 的窗口，比正常窗口
+            // 低 45dB，但它内部起伏够大，voiced 照样算出 0.30，顺利过门。
+            // 那种弱信号算出的 embedding 不稳定，分数在 0.2~0.8 之间乱跳
+            // （用户说的"飘"就是这个）。它对应的正是 rms=-49.3 却得 0.750
+            // 的那几条。
+            //
+            // -60dBFS：这台 Xperia 正常说话 p90 在 -30~-34，静音/过渡段在
+            // -77 以下，中间有很大空档。取 -60 两边都留足余量。
+            if (ref < MIN_VOICED_LEVEL_DB) return 0.0
             var voiced = 0
             for (v in db) if (v > ref - VOICED_MARGIN_DB) voiced++
             return voiced.toDouble() / n
