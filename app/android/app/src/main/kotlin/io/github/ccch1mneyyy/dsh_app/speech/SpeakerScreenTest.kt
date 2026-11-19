@@ -43,6 +43,9 @@ internal object SpeakerScreenTest {
 
     @Volatile private var thread: Thread? = null
 
+    /** 上一个窗口的原始结论，用于"YOU 要连续确认"。 */
+    @Volatile private var _lastKind: String = "UNKNOWN"
+
     /** 采集时 AEC 是否真的挂上了。false 表示回声没被削，分数会虚高。 */
     @Volatile var echoCancelled: Boolean = false
         private set
@@ -222,11 +225,15 @@ internal object SpeakerScreenTest {
             if (dot > best) best = dot
         }
         val c = Voiceprint.cutoffs()
-        val kind = when {
+        val rawKind = when {
             best >= c.accept -> "YOU"
             best <= c.reject -> "OTHER"
             else -> "UNKNOWN"
         }
+        // 播放时 YOU 要连续两个窗口才认，和 SpeakerGate 同一套规则。
+        // 这一轮整个都在播放中，所以无条件要求确认。
+        val kind = if (rawKind == "YOU" && _lastKind != "YOU") "UNKNOWN" else rawKind
+        _lastKind = rawKind
         // 闸门的实际行为：YOU 放行；OTHER 看 allowOthers；UNKNOWN 在**播放中**
         // 拦住（"认不准"此时最可能是自己的回声）。
         //
