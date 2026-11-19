@@ -6,6 +6,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.audiofx.AudioEffect
 import android.util.Log
+import io.github.ccch1mneyyy.dsh_app.nativemedia.SpeakerGate
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -188,6 +189,23 @@ internal object SpeakerScreenTest {
         val rms = sqrt(sum / audio.size)
         val rmsDb = 20 * log10(maxOf(rms, 1e-9))
 
+        // 空白段不参与比对——和 SpeakerGate、唤醒同一套判据。
+        //
+        // 之前这里漏了这层（说好三处统一，实景测试这一处没补上），于是
+        // 整段全 0 的窗口也照样算 embedding：0 向量 L2 归一化后是 NaN/退化，
+        // 与任何模板的相似度都可能很高。实测就出现过 rms=-49.7 却拿 0.849
+        // 的窗口，拉下 wav 一看整段是 -240dB（纯 0）。
+        val voiced = SpeakerGate.voicedFraction(audio)
+        if (voiced < SpeakerGate.MIN_VOICED_FRACTION) {
+            return Window(
+                score = -1f,
+                kind = "BLANK",
+                rms = rmsDb,
+                barged = false,
+                audio = audio,
+            )
+        }
+
         val vector = runCatching { Voiceprint.embed(audio) }.getOrNull()
         if (vector == null || vector.isEmpty()) {
             return Window(score = -1f, kind = "NONE", rms = rmsDb, barged = false, audio = audio)
@@ -209,13 +227,15 @@ internal object SpeakerScreenTest {
             best <= c.reject -> "OTHER"
             else -> "UNKNOWN"
         }
-        // 闸门的实际行为：YOU 放行；OTHER 看 allowOthers；UNKNOWN 一律放行
-        // （那一处是有意为之——认不准时不替人做决定，见 SpeakerGate 的注释）。
+        // 闸门的实际行为：YOU 放行；OTHER 看 allowOthers；UNKNOWN 在**播放中**
+        // 拦住（"认不准"此时最可能是自己的回声）。
+        //
         // 这里照抄同一套规则，否则"测出来能打断"和"真的能打断"对不上。
+        // 本类整个生命周期都在播放中，所以 UNKNOWN 按播放中的规则算。
         val barged = when (kind) {
             "YOU" -> true
             "OTHER" -> c.allowOthers
-            else -> true
+            else -> false
         }
         Log.i(TAG, "score=${"%.3f".format(best)} kind=$kind rms=${"%.1f".format(rmsDb)} barged=$barged")
         return Window(score = best, kind = kind, rms = rmsDb, barged = barged, audio = audio)
