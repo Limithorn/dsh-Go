@@ -99,6 +99,19 @@ class SpeakerGate(
     private val window = ShortArray(capacity)
 
     private var filled = 0
+
+    /**
+     * 采集刚开始时还要丢掉的采样数。
+     *
+     * AudioRecord 启动后的前 100~200ms 有一段强瞬态（实测第一帧 -35.6dB，
+     * 紧接着掉到 -65），之后才进入稳态。这段尖峰有两个害处：
+     * 一、把 voicedFraction 的参考电平抬高，于是"够响"的判定形同虚设；
+     * 二、它本身成为 embedding 的主要成分，而每轮启动的尖峰形状都相似，
+     *     于是算出很高的分数——实景测试里表现为"刚开头必判成本人"。
+     *
+     * 每轮 reset 时重新计。
+     */
+    private var warmupLeft = WARMUP_SAMPLES
     private var frames = 0L
     private var generation = 0L
     private var inFlight = false
@@ -209,6 +222,13 @@ class SpeakerGate(
 
     /** 攒帧；攒满一段就派一次推理（上一段没算完就丢，不排队）。 */
     private fun push(frame: ShortArray) {
+        if (warmupLeft > 0) {
+            val skip = minOf(warmupLeft, frame.size)
+            warmupLeft -= skip
+            if (skip >= frame.size) return
+            // 部分丢弃：把剩下的部分挪到前面再继续。
+            return push(frame.copyOfRange(skip, frame.size))
+        }
         val copy = minOf(FRAME_SAMPLES, frame.size)
         // 滑窗：先把旧的往前挪，腾出尾部空间。
         if (filled + copy > capacity) {
@@ -314,6 +334,7 @@ class SpeakerGate(
     override fun reset() {
         inner.reset()
         filled = 0
+        warmupLeft = WARMUP_SAMPLES
         frames = 0
         latest = null
         delivered.set(null)
@@ -329,6 +350,15 @@ class SpeakerGate(
         const val FRAME_MS = 20
         const val FRAME_SAMPLES = 320
         const val WINDOW_MS = 1500
+        const val RATE = 16000
+
+        /**
+         * 启动瞬态的丢弃长度：400ms。
+         *
+         * 实测起音尖峰在前 100~200ms 内衰减完，400ms 有余量。代价是第一个
+         * 判定结论晚 0.4 秒出来——比起"刚开口就被判成自己人"，这个代价值得。
+         */
+        val WARMUP_SAMPLES = RATE * 400 / 1000
 
         /** 结论超过这么久没更新就不算数。 */
         val STALE_FRAMES = 1000 / FRAME_MS
@@ -344,7 +374,6 @@ class SpeakerGate(
          * 再紧就一条都存不到了。静默窗口在 −85 以下，挡得住。
          */
         const val DUMP_MIN_RMS = 1e-3
-        const val RATE = 16000
 
         /**
          * 判定"这一帧算在说话"的余量：比说话电平低 25dB 之内。
