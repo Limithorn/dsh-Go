@@ -233,5 +233,22 @@ object Voiceprint {
         "accept" to cutoffs().accept,
         "reject" to cutoffs().reject,
         "ready" to available(),
+        // 诊断页要看到的那一串：门槛怎么来的、静默检测怎么判的。
+        // 光看 accept 一个数，分不清"分数不够"和"根本没算"。
+        "level" to level.name.lowercase(),
+        "bias" to bias,
+        "allowOthers" to allowOthers,
+        "wake" to wake,
+        "blocked" to blocked,
+        "loading" to loading,
+        "silencePercentile" to silence.percentile,
+        "silenceMultiple" to silence.multiple,
+        "silenceFloor" to silence.absoluteFloor,
+        "silenceVoicedFraction" to silence.voicedFraction,
+        // 三道闸各自的线，一起给出来对照。
+        "acceptBarge" to Thresholds.accept(level, profiles.get().size, Thresholds.Gate.BARGE, bias),
+        "acceptWake" to Thresholds.accept(level, profiles.get().size, Thresholds.Gate.WAKE, bias),
+        "acceptTurn" to Thresholds.accept(level, profiles.get().size, Thresholds.Gate.TURN, bias),
+        "band" to Thresholds.BAND,
     )
 }

@@ -7,6 +7,8 @@ import '../../l10n/l10n.dart';
 import '../../speech/voiceprint_store.dart';
 import '../shell/page_frame.dart';
 import '../settings/settings_widgets.dart';
+import 'speech_diagnostics_page.dart';
+import 'speech_self_test_page.dart';
 import 'voiceprint_diagnostics_page.dart';
 import 'voiceprint_enroll_page.dart';
 
@@ -68,6 +70,25 @@ class VoiceprintListPage extends ConsumerWidget {
                 title: l10n.speechVoiceprintDiagnostics,
                 onTap: () => unawaited(Navigator.of(context).push(
                   MaterialPageRoute<void>(builder: (_) => const VoiceprintDiagnosticsPage()),
+                )),
+              ),
+              // 上面那页看"这次判定得了多少分"，这一页看"每一道闸的线画在哪"。
+              // 分数不对时先来这里——线画错了，分数再高也没用。
+              SettingsTile(
+                key: const ValueKey('speech-chain-diagnostics'),
+                title: '语音链路诊断',
+                subtitle: '采集、静默、打分、三道闸各自的当前值',
+                onTap: () => unawaited(Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const SpeechDiagnosticsPage()),
+                )),
+              ),
+              // 上面两页是"看"，这一页是"跑"：当场把链路走一遍，不用打电话。
+              SettingsTile(
+                key: const ValueKey('speech-self-test'),
+                title: '语音自测',
+                subtitle: '不用打电话，逐项跑一遍看哪一环断了',
+                onTap: () => unawaited(Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const SpeechSelfTestPage()),
                 )),
               ),
             ],

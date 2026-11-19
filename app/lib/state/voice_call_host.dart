@@ -84,6 +84,13 @@ class VoiceCallHost extends ChangeNotifier {
       mic: settings.voiceprintMic,
     );
   }
+
+  /// 手动把当前设置推一次给原生。
+  ///
+  /// 诊断页那个「同步到原生」按钮用的。平时不必点——设置一改就该自动推；
+  /// 留着是为了两种情形：一是怀疑自动推送没生效（诊断页两边值对不上时点一下
+  /// 就能确认），二是原生侧被别的东西重置过（模型重载、进程被回收）。
+  static Future<void> pushVoiceprintNow(ProviderContainer container) => _pushVoiceprint(container);
   String _title = '';
   bool _collapsed = false;
   bool _pageUp = false;
@@ -153,8 +160,21 @@ class VoiceCallHost extends ChangeNotifier {
       container.listen(callSettingsProvider.select((s) => s.pause), (_, pause) => made.setPause(pause)),
       // 声纹的开关、外人能不能插话、认得松紧：通话中改了要立刻生效，
       // 不必等下一通电话。白名单本身也可能在通话中被改（另一个入口），一起听。
+      //
+      // 收音档位和阈值偏移也必须在这里：它们只在通话开始那一刻推送的话，
+      // 设置页改完不进通话就永远送不到原生——诊断页上显示"设置 0.30 / 原生
+      // 0.20"，看着像没生效，实际是压根没推。
       container.listen(
-        callSettingsProvider.select((s) => (s.voiceprint, s.voiceprintOthers, s.voiceprintLevel, s.voiceprintWake)),
+        callSettingsProvider.select(
+          (s) => (
+            s.voiceprint,
+            s.voiceprintOthers,
+            s.voiceprintLevel,
+            s.voiceprintWake,
+            s.voiceprintMic,
+            s.voiceprintBias,
+          ),
+        ),
         (_, _) => unawaited(_pushVoiceprint(container)),
       ),
       container.listen(voiceprintProfilesProvider, (_, _) => unawaited(_pushVoiceprint(container))),
