@@ -43,9 +43,19 @@ STAMP=$(date +%Y%m%d-%H%M)
 NAME="dsh-${VERSION_NAME}-${BUILD}-${STAMP}-${MODE}"
 
 # ---- 编译 ----------------------------------------------------------------
-export JAVA_HOME="${JAVA_HOME:-C:/Users/FELiCiTas/Desktop/AGENT/HANAKO/tools/jdk17}"
+# 固定用仓库自带的 JDK 17。
+#
+# 不能写 ${JAVA_HOME:-...}：机器上装了 JDK 21 时那个值会被继承过去，而
+# AGP 的这个版本在 21 上会卡住不报错（实测打了二十分钟没有任何输出）。
+JDK17="C:/Users/FELiCiTas/Desktop/AGENT/HANAKO/tools/jdk17"
+if [ -d "$JDK17" ]; then
+  export JAVA_HOME="$JDK17"
+fi
+export PATH="$JAVA_HOME/bin:$PATH"
 export ANDROID_HOME="${ANDROID_HOME:-C:/Users/FELiCiTas/Desktop/AGENT/HANAKO/tools/android-sdk}"
 FLUTTER="${FLUTTER:-C:/Users/FELiCiTas/Desktop/AGENT/HANAKO/tools/flutter/flutter/bin/flutter.bat}"
+
+echo "  java: $("$JAVA_HOME/bin/java" -version 2>&1 | head -1)"
 
 ARGS=(build apk --flavor arm64 --target-platform android-arm64)
 if [ "$MODE" = "release" ]; then
@@ -61,7 +71,17 @@ ARGS+=(--dart-define=DSH_BUILD_COMMIT="${BUILD}")
 ARGS+=(--dart-define=DSH_BUILD_TIME="${STAMP}")
 
 echo "→ ${NAME}"
-"$FLUTTER" "${ARGS[@]}"
+
+# 日志落到文件里：管道收给 grep 的话，卡在哪一步完全看不见。
+# 这台机器上完整编译要 20 分钟到一个小时，看 tail -f 比盯着空屏强。
+LOG="build-apk.log"
+"$FLUTTER" "${ARGS[@]}" > "$LOG" 2>&1
+STATUS=$?
+if [ $STATUS -ne 0 ]; then
+  echo "✗ 编译失败（$STATUS），最后几行：" >&2
+  tail -20 "$LOG" >&2
+  exit $STATUS
+fi
 
 SRC="build/app/outputs/flutter-apk/app-arm64-${MODE}.apk"
 OUT="build/app/outputs/flutter-apk/${NAME}.apk"
