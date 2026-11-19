@@ -53,7 +53,14 @@ class SpeakerGate(
     }
 
     /** 一份白名单模板：id 用来回报，向量已 L2 归一化。 */
-    data class Profile(val id: String, val vector: FloatArray)
+    /**
+     * 一份可用来比对的声纹模板。
+     *
+     * [source] 只是记着"这份是怎么录的"（call / wake / raw），比对时不参与
+     * 计算——同一句话在不同场景下分数天然不同，取最高分自然会选中对的那份。
+     * 它只用来数"有几个人"：同一个人录了两份，门槛不该按两人抬。
+     */
+    data class Profile(val id: String, val vector: FloatArray, val source: String = "call")
 
     fun interface ProfileSource {
         fun current(): List<Profile>

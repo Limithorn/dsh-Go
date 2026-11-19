@@ -163,7 +163,8 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                         is List<*> -> v.mapNotNull { (it as? Number)?.toFloat() }.toFloatArray()
                         else -> null
                     } ?: return@mapNotNull null
-                    SpeakerGate.Profile(id, vec)
+                    // 只用来数有几个人、以及界面上显示，比对时不参与。
+                    SpeakerGate.Profile(id, vec, entry["source"] as? String ?: "call")
                 }
                 Log.i("Voiceprint", "configure: raw=${raw.size} kept=${list.size} enabled=${call.argument<Boolean>("enabled")}")
                 Voiceprint.setConfig(
@@ -236,7 +237,10 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                     return
                 }
                 micVoiceprint = MicArbiter.beginDictation()
-                result.success(VoiceprintRecorder.start())
+                // 录哪个音源：call（默认，带 AEC，和通话同分布）/ wake / raw。
+                // 同一句话在两种场景下电平差十几 dB，模板要分开录才认得准。
+                val which = VoiceprintRecorder.Source.of(call.argument<String>("source"))
+                result.success(VoiceprintRecorder.start(which))
             }
             "voiceprintRecordStop" -> {
                 val samples = VoiceprintRecorder.stop()

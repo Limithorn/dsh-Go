@@ -65,7 +65,16 @@ object Voiceprint {
 
     /** 当前门槛；人数变了要跟着变（去人后门槛回落）。 */
     fun cutoffs(gate: Thresholds.Gate = Thresholds.Gate.BARGE): SpeakerGate.Cutoffs {
-        val n = profiles.get().size
+        val list = profiles.get()
+        val n = list.size
+        // 门槛照旧按模板数 n 算。
+        //
+        // 想过按"人数"算（同一人录了通话、唤醒两份只算一个），但做不到：
+        // 模板之间没有可靠的"同属一人"标记，硬猜会把真正的第二个人算成一个。
+        // 而 n 抬高 0.045*ln N 的幅度很小：录两份 = +0.031，录四份 = +0.062。
+        // 多一份模板同时让"取最高分"更容易命中，两者大致抵得上。
+        //
+        // 真嫌门槛被抬高，把那人的第二份删掉、或者调「这台机器微调」的 bias。
         val accept = Thresholds.accept(level, n, gate, bias)
         val reject = Thresholds.reject(level, n, gate, bias)
         // 唤醒自己有个开关；通话看总开关。两者都用同一份模板。

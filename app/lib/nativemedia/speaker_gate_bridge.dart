@@ -7,7 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import '../speech/sherpa_speaker_embedder.dart';
 import '../speech/speech_audio.dart' show VoiceprintMic;
 
-import '../speech/voiceprint_store.dart' show VoiceProfile;
+import '../speech/voiceprint_store.dart' show VoiceProfile, VoiceProfileSource;
 
 /// 白名单条目，送到原生做比对用：id 这里是 VoiceProfile.id，向量已归一化。
 class GateProfile {
@@ -82,7 +82,7 @@ class VoiceprintChannel {
         if (mic != null) 'silence': mic.wireArgs,
         'profiles': [
           for (final p in profiles)
-            {'id': p.id, 'vector': Float32List.fromList(p.vector)},
+            {'id': p.id, 'vector': Float32List.fromList(p.vector), 'source': p.source.wire},
         ],
       });
     } on PlatformException {
@@ -138,9 +138,9 @@ class VoiceprintChannel {
   }
 
   /// 开始录一段（与通话同一套采集配置）。返回 false 表示麦克风打不开。
-  Future<bool> startRecording() async {
+  Future<bool> startRecording({VoiceProfileSource source = VoiceProfileSource.call}) async {
     try {
-      return await _channel.invokeMethod<bool>('voiceprintRecordStart') ?? false;
+      return await _channel.invokeMethod<bool>('voiceprintRecordStart', {'source': source.wire}) ?? false;
     } on PlatformException {
       return false;
     } on MissingPluginException {

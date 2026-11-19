@@ -41,7 +41,10 @@ class VoiceprintListPage extends ConsumerWidget {
                 SettingsTile(
                   key: ValueKey('voiceprint-${profiles[i].id}'),
                   title: _name(context, profiles[i], i),
-                  subtitle: l10n.speechVoiceprintRecordedAt(_shortDate(profiles[i].createdAt)),
+                  // 音源要显出来：同一个人可能有两份（通话一份、唤醒一份），
+                  // 只看「#1 #2」分不清哪份是哪种场景录的。
+                  subtitle:
+                      '${profiles[i].source.label} · ${l10n.speechVoiceprintRecordedAt(_shortDate(profiles[i].createdAt))}',
                   onTap: () => unawaited(_open(context, ref, profiles[i])),
                 ),
             ],
