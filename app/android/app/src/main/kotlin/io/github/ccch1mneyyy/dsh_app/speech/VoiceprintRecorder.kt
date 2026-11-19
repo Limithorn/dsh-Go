@@ -22,6 +22,38 @@ internal object VoiceprintRecorder {
     private const val TAG = "VoiceprintRecorder"
     const val RATE = 16_000
 
+    /**
+     * 录一段声音时用哪个音源——决定这份模板将来"像"哪种场景下的声音。
+     *
+     * 为什么要分开：同一句话，走通话（VOICE_COMMUNICATION + AEC + 降噪）和
+     * 走唤醒（无播放、无 AEC）拿到的是两段电平差十几 dB、频谱也被改过的音频，
+     * 算出来的向量自然对不上。用一个模板硬扛两种分布，结果就是两边都不准。
+     *
+     * 实测那台机器：VC 峰值 −68.5 dBFS、VR −54.1、MIC −57.6。差 14dB 的时候，
+     * 拿 VC 录的模板去认 VR 采的声音，分数会明显偏低。
+     */
+    enum class Source(val audioSource: Int, val label: String) {
+        /** 通话用：AEC + 降噪开着，和推理时同分布。 */
+        CALL(MediaRecorder.AudioSource.VOICE_COMMUNICATION, "call"),
+
+        /** 唤醒用：不降噪、不消回声，电平和录入时接近。 */
+        WAKE(MediaRecorder.AudioSource.VOICE_RECOGNITION, "wake"),
+
+        /** 原始麦克风：不经过任何处理，电平最高，用于对照。 */
+        RAW(MediaRecorder.AudioSource.MIC, "raw");
+
+        companion object {
+            fun of(wire: String?): Source = when (wire) {
+                "wake" -> WAKE
+                "raw" -> RAW
+                else -> CALL
+            }
+        }
+    }
+
+    /** 这一次录制用的音源。默认通话，和旧行为一致。 */
+    @Volatile private var source = Source.CALL
+
     /** 开头 600ms 量环境底噪。 */
     private const val FLOOR_MS = 600
 
@@ -60,7 +92,10 @@ internal object VoiceprintRecorder {
 
     /** 开始录；返回 false 表示麦克风打不开。 */
     @SuppressLint("MissingPermission")
-    fun start(): Boolean = synchronized(lock) { startLocked() }
+    fun start(which: Source = Source.CALL): Boolean = synchronized(lock) {
+        source = which
+        startLocked()
+    }
 
     private fun startLocked(): Boolean {
         stopLocked()
@@ -68,7 +103,7 @@ internal object VoiceprintRecorder {
         if (min <= 0) return false
         val r = try {
             AudioRecord(
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                source.audioSource,
                 RATE,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
@@ -82,11 +117,16 @@ internal object VoiceprintRecorder {
             r.release()
             return false
         }
-        // 与通话同源：AEC 开着，录到的才和推理时一样。
-        aec = if (AcousticEchoCanceler.isAvailable()) {
+        // 只有通话档开 AEC/降噪：这一档录到的要和推理时（通话）一样。
+        //
+        // 唤醒档和原始档必须关掉——它们的意义就是"不被处理过的声音"。
+        // 开了 AEC 又把音量削下去，还多了回声门限，录出来的东西和唤醒时
+        // 听到的完全不是一回事，模板就白录了。
+        val processed = source == Source.CALL
+        aec = if (processed && AcousticEchoCanceler.isAvailable()) {
             AcousticEchoCanceler.create(r.audioSessionId)?.also { it.enabled = true }
         } else null
-        ns = if (NoiseSuppressor.isAvailable()) {
+        ns = if (processed && NoiseSuppressor.isAvailable()) {
             NoiseSuppressor.create(r.audioSessionId)?.also { it.enabled = true }
         } else null
 

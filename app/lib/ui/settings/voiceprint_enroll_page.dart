@@ -41,6 +41,13 @@ class _VoiceprintEnrollPageState extends ConsumerState<VoiceprintEnrollPage> {
   /// 录好的三段采样。
   final List<Float32List> _takes = [];
 
+  /// 这次录的音源。
+  ///
+  /// 同一句话，通话里（AEC + 降噪）和唤醒时（不处理）拿到的是电平差十几 dB
+  /// 的两段音频，向量对不上。想两种场景都认得出来，就各录一份：先用「通话」
+  /// 录一次，再用「唤醒」录一次，得到两个 profile。
+  VoiceProfileSource _source = VoiceProfileSource.call;
+
   /// 最近一次录音的实测值，用于校准阈值（也让人知道到底多小声）。
   RecordedAudio? _last;
 
@@ -95,6 +102,30 @@ class _VoiceprintEnrollPageState extends ConsumerState<VoiceprintEnrollPage> {
               ),
             ],
           ),
+        ),
+        // 录哪个音源。放在最上面，因为它决定了这次录出来的模板"将来在哪种
+        // 场景下认得准"，录完再改就晚了。
+        SettingsSection(
+          children: [
+            SettingsSegmentTile<VoiceProfileSource>(
+              key: const ValueKey('voiceprint-source'),
+              title: '用哪一路声音',
+              subtitle: _source == VoiceProfileSource.call
+                  ? '通话里带降噪，录这份用来打断。想让叫名字也认得，再录一份「唤醒」'
+                  : _source == VoiceProfileSource.wake
+                  ? '唤醒时不降噪，录这份用来叫名字。打破断还需要一份「通话」'
+                  : '不经任何处理，电平最高。一般用于对照，不建议当模板',
+              segments: const [
+                PillSegment(VoiceProfileSource.call, '通话'),
+                PillSegment(VoiceProfileSource.wake, '唤醒'),
+              ],
+              selected: _source,
+              // 正在录的时候不让改：这一段的向量得和哪一路对得上，中途换就乱了。
+              onChanged: (_recording || _busy)
+                  ? null
+                  : (next) => setState(() => _source = next),
+            ),
+          ],
         ),
         SettingsSection(
           children: [
@@ -200,7 +231,7 @@ class _VoiceprintEnrollPageState extends ConsumerState<VoiceprintEnrollPage> {
       _last = null;
       _left = _seconds;
     });
-    final ok = await _channel.startRecording();
+    final ok = await _channel.startRecording(source: _source);
     if (!ok) {
       if (mounted) setState(() => _hint = context.l10n.speechVoiceprintUnsupported);
       return;
@@ -401,6 +432,7 @@ class _VoiceprintEnrollPageState extends ConsumerState<VoiceprintEnrollPage> {
           id: DateTime.now().microsecondsSinceEpoch.toString(),
           createdAt: DateTime.now(),
           vector: merged,
+          source: _source,
         ),
       );
       if (mounted) Navigator.of(context).pop();

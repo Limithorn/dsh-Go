@@ -10,12 +10,42 @@ import '../nativemedia/speaker_gate_bridge.dart';
 /// 白名单里的一位：一条录入的声纹。
 ///
 /// 只存本机、加密存；不写进 [SharedPreferences]（那是明文，声纹是生物特征）。
+/// 这份声纹是用哪种音源录的。
+///
+/// 三档对应原生 `VoiceprintRecorder.Source`。选哪个不影响录入本身，
+/// 只影响"这份模板将来在哪种场景下认得最准"：
+///
+/// - [call] 通话（AEC + 降噪）——打断判定用的就是这一路
+/// - [wake] 唤醒（不降噪、不消回声）——叫名字时用的是这一路
+/// - [raw] 原始麦克风——不经任何处理，电平最高，留给对照用
+enum VoiceProfileSource {
+  call('call', '通话（有降噪）'),
+  wake('wake', '唤醒（不降噪）'),
+  raw('raw', '原始麦克风');
+
+  const VoiceProfileSource(this.wire, this.label);
+
+  /// 给原生和存储用的名字。
+  final String wire;
+
+  /// 界面上显示的名字。
+  final String label;
+
+  /// 老数据没有这个字段，按通话算——那是之前唯一的采集方式。
+  static VoiceProfileSource of(String? wire) => switch (wire) {
+    'wake' => VoiceProfileSource.wake,
+    'raw' => VoiceProfileSource.raw,
+    _ => VoiceProfileSource.call,
+  };
+}
+
 class VoiceProfile {
   const VoiceProfile({
     required this.id,
     required this.createdAt,
     required this.vector,
     this.label = '',
+    this.source = VoiceProfileSource.call,
   });
 
   /// 稳定 id：录入那一刻生成，删除/覆盖都认它。
@@ -29,14 +59,30 @@ class VoiceProfile {
   /// 192 维、已 L2 归一化。
   final Float32List vector;
 
-  VoiceProfile copyWith({String? label}) =>
-      VoiceProfile(id: id, label: label ?? this.label, createdAt: createdAt, vector: vector);
+  /// 这份模板是用哪种音源录的。
+  ///
+  /// 同一句话，通话里（AEC + 降噪）和唤醒时（不处理）拿到的是两段电平差
+  /// 十几 dB 的音频，向量自然对不上。录的时候选哪个音源，就决定这份模板
+  /// 在哪种场景下认得更准——两种场景各录一份，才都认得出来。
+  ///
+  /// 旧数据没有这个字段，按 [VoiceProfileSource.call] 读——那是之前唯一的
+  /// 采集方式，语义正好对上。
+  final VoiceProfileSource source;
+
+  VoiceProfile copyWith({String? label, VoiceProfileSource? source}) => VoiceProfile(
+    id: id,
+    label: label ?? this.label,
+    createdAt: createdAt,
+    vector: vector,
+    source: source ?? this.source,
+  );
 
   Map<String, Object?> toJson() => {
     'id': id,
     'label': label,
     'createdAt': createdAt.millisecondsSinceEpoch,
     'vector': base64Encode(_bytesOf(vector)),
+    'source': source.wire,
   };
 
   static VoiceProfile? fromJson(Object? raw) {
@@ -54,6 +100,7 @@ class VoiceProfile {
         label: raw['label'] is String ? raw['label'] as String : '',
         createdAt: DateTime.fromMillisecondsSinceEpoch(at),
         vector: floats,
+        source: VoiceProfileSource.of(raw['source'] as String?),
       );
     } on Object {
       return null;
