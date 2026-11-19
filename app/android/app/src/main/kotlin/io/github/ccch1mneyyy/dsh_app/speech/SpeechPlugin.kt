@@ -263,46 +263,59 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                 val fromCapture = capture?.lastAec ?: SpeakerScreenTest.lastAec
                 result.success(fromCapture?.let { AecSupport.run { it.toMap() } } ?: emptyMap<String, Any?>())
             }
-            // 实测量一遍：同一段静默，三种配置各录一次，看 AEC 到底削掉多少。
-            // 这一步要 3 秒左右，界面自己等。
-            "aecProbe" -> {
-                if (capture != null || SpeakerScreenTest.isRunning) {
+            // AEC 量测：必须边放边测。
+            //
+            // 之前这里是"静默录三次"，完全测不出 AEC——AEC 拿正在播放的音频
+            // 当参考信号去减，不放东西它就没有参考可减，效果是恒等变换，
+            // 测出来的差值只是底噪波动。用户也指出了这一点。
+            //
+            // 现在：放一段扫频音，同时录，跟"不播放时的底噪"比。差值就是
+            // 漏进来的回声。三种配置各来一次，能看出 AEC 和音源各自贡献多少。
+            "aecEcho" -> {
+                if (capture != null || SpeakerScreenTest.isRunning || micVoiceprint != 0) {
                     result.success(mapOf("error" to "正在用麦克风，先停掉通话或测试"))
                     return
                 }
-                val m = AecSupport.probeMatrix(call.argument<Int>("ms") ?: 1200)
-                result.success(
-                    if (m == null) {
-                        mapOf("error" to "测不了（可能并发调用）")
-                    } else {
-                        mapOf(
-                            "vcNoAec" to m.vcNoAec,
-                            "vcAec" to m.vcAec,
-                            "vrNoAec" to m.vrNoAec,
-                            "cut" to m.aecCut,
-                            "sdk" to android.os.Build.VERSION.SDK_INT,
-                            "sourceName" to AecSupport.sourceName(MediaRecorder.AudioSource.VOICE_COMMUNICATION),
+                val ms = (call.argument<Int>("ms") ?: 1500).coerceIn(600, 4000)
+                val play = EchoTone(context)
+                val out = LinkedHashMap<String, Any?>()
+                try {
+                    // 通话音源 · 关 AEC
+                    out["vcNoAec"] = run {
+                        val r = AecSupport.measureEcho(
+                            MediaRecorder.AudioSource.VOICE_COMMUNICATION, false, ms,
+                            play = { play.start() }, stopPlay = { play.stop() },
                         )
-                    },
-                )
-            }
-            // 单个音源 + 开关 AEC 的量测，给"对比"按钮用。
-            "aecLevel" -> {
-                if (capture != null || SpeakerScreenTest.isRunning) {
-                    result.success(-999.0)
-                    return
+                        mapOf("playing" to r.playingDb, "silent" to r.silentDb, "leak" to r.leak, "usable" to r.usable)
+                    }
+                    Thread.sleep(300)
+                    // 通话音源 · 开 AEC
+                    out["vcAec"] = run {
+                        val r = AecSupport.measureEcho(
+                            MediaRecorder.AudioSource.VOICE_COMMUNICATION, true, ms,
+                            play = { play.start() }, stopPlay = { play.stop() },
+                        )
+                        mapOf(
+                            "playing" to r.playingDb, "silent" to r.silentDb,
+                            "leak" to r.leak, "usable" to r.usable, "aecOn" to r.aecOn,
+                        )
+                    }
+                    Thread.sleep(300)
+                    // 识别音源 · 关 AEC
+                    out["vrNoAec"] = run {
+                        val r = AecSupport.measureEcho(
+                            MediaRecorder.AudioSource.VOICE_RECOGNITION, false, ms,
+                            play = { play.start() }, stopPlay = { play.stop() },
+                        )
+                        mapOf("playing" to r.playingDb, "silent" to r.silentDb, "leak" to r.leak, "usable" to r.usable)
+                    }
+                } finally {
+                    play.release()
                 }
-                result.success(
-                    AecSupport.probeLevel(
-                        when (call.argument<String>("source")) {
-                            "recognition" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
-                            "mic" -> MediaRecorder.AudioSource.MIC
-                            else -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
-                        },
-                        call.argument<Boolean>("withAec") == true,
-                        call.argument<Int>("ms") ?: 1200,
-                    ),
-                )
+                out["sdk"] = android.os.Build.VERSION.SDK_INT
+                out["okThreshold"] = AecSupport.LEAK_OK
+                out["badThreshold"] = AecSupport.LEAK_BAD
+                result.success(out)
             }
             "screenTestStart" -> {
                 if (capture != null) {

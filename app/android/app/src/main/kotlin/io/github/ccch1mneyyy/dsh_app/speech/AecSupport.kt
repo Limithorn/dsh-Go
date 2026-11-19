@@ -254,63 +254,229 @@ internal object AecSupport {
             r.release()
             return -999.0
         }
-        val frames = VoiceprintRecorder.RATE * ms / 1000
+        // 丢掉开头一段。
+        //
+        // AudioRecord 刚 startRecording 之后，硬件还没 warm up，前 200~400ms
+        // 常常整段返回 0。之前把这些 0 也算进去，结果是 -128 dBFS——那不是
+        // "声音很小"，是纯数字静默（16bit 能表示的下限约 -96dB，多帧平均
+        // 能压到 -128）。据此算出的"AEC 削了 35dB"是假的。
+        val warmup = VoiceprintRecorder.RATE * 450 / 1000
         val buf = ShortArray(1600)
+        var skipped = 0
+        while (skipped < warmup) {
+            val n = runCatching { r.read(buf, 0, buf.size) }.getOrDefault(-1)
+            if (n <= 0) break
+            skipped += n
+        }
+
+        val frames = VoiceprintRecorder.RATE * ms / 1000
         var sum = 0.0
         var count = 0
-        var peak = 0.0
-        val deadline = System.currentTimeMillis() + ms + 500
+        var silent = 0
+        val deadline = System.currentTimeMillis() + ms + 800
         while (count < frames && System.currentTimeMillis() < deadline) {
             val n = runCatching { r.read(buf, 0, buf.size) }.getOrDefault(-1)
             if (n <= 0) break
             for (i in 0 until n) {
-                val v = buf[i] / 32768.0
+                val s = buf[i]
+                if (s == 0.toShort()) silent++
+                val v = s / 32768.0
                 sum += v * v
-                val a = if (v < 0) -v else v
-                if (a > peak) peak = a
                 count++
             }
         }
         runCatching { r.stop() }
         runCatching { r.release() }
         effects.forEach { runCatching { it.release() } }
-        if (count == 0) return -999.0
+        if (count == 0) return -998.0
+        // 超过 90% 的采样是 0，说明这一路根本没在采（而不是安静）。
+        // 报 -997 区分开，别让界面把它当成"回声很小"。
+        if (silent.toDouble() / count > 0.9) return -997.0
         val rms = sqrt(sum / count)
         return 20 * log10(maxOf(rms, 1e-12))
     }
 
-    /** 一次性把两种音源、AEC 开关两种状态都量一遍，给诊断页看。 */
-    data class Matrix(
-        val vcNoAec: Double,
-        val vcAec: Double,
-        val vrNoAec: Double,
+    /**
+     * 回声残留的量测结果。
+     *
+     * 为什么必须"边放边测"：AEC 的工作方式是用**正在播放的音频**作参考信号，
+     * 在麦克风里找到并减掉它。不播放时它没有参考可减，效果就是一个恒等变换
+     * ——测出来的差值是底噪波动，跟回声消除毫无关系。
+     *
+     * 所以这里比的是：
+     *   [playingDb]  正在播放时的电平（含回声残留）
+     *   [silentDb]   停止播放后的电平（纯底噪）
+     * 差值就是漏进来的回声。差得越多，AEC 越没用。
+     */
+    data class EchoResult(
+        /** 播放时录到的 RMS（dBFS）。 */
+        val playingDb: Double,
+        /** 不播放时录到的 RMS（dBFS）。 */
+        val silentDb: Double,
+        /** 有没有真的挂上 AEC。 */
+        val aecOn: Boolean,
+        /** 用的哪个音源。 */
+        val source: String,
     ) {
-        /** AEC 实际削掉多少 dB。正数=确实削了。 */
-        val aecCut: Double get() = if (vcNoAec <= -900 || vcAec <= -900) Double.NaN else vcNoAec - vcAec
+        /** 回声漏进来多少 dB。负数说明播放时反而更安静（基本不可能，多半是没采到）。 */
+        val leak: Double get() = playingDb - silentDb
 
-        val rows: List<Triple<String, Double, String>>
-            get() = listOf(
-                Triple("通话音源 · 不开 AEC", vcNoAec, "回声的原始样子"),
-                Triple("通话音源 · 开 AEC", vcAec, "AEC 削过之后"),
-                Triple("识别音源 · 不开 AEC", vrNoAec, "不降噪，电平最高"),
-            )
+        /** 这个结果能不能拿来做判断。 */
+        val usable: Boolean
+            get() = playingDb > -900 && silentDb > -900
+
+        /**
+         * 结论。
+         *
+         * 门槛按经验定：AEC 正常工作时，外放的回声会被压到底噪以下或与之相当，
+         * 差值通常在 10 dB 内；完全没消的话，外放的回声会比底噪高 25 dB 以上。
+         */
+        val verdict: String
+            get() = when {
+                !usable -> "没测出来"
+                leak < LEAK_OK -> "回声基本没漏（高 ${"%.1f".format(leak)} dB）"
+                leak < LEAK_BAD -> "漏了一点（高 ${"%.1f".format(leak)} dB）"
+                else -> "回声漏得厉害（高 ${"%.1f".format(leak)} dB）"
+            }
+
+        val good: Boolean get() = usable && leak < LEAK_OK
     }
 
-    private val probing = AtomicBoolean(false)
+    /** 播放不高于底噪 10 dB：认为消干净了。 */
+    const val LEAK_OK = 10.0
 
+    /** 播放高于底噪 22 dB：等于没消。 */
+    const val LEAK_BAD = 22.0
+
+    /**
+     * 量一次回声：播放一段音，同时录；再静默录一段作对照。
+     *
+     * [tone] 一个可播的函数，接管"放一段已知声音"，返回后播放已停止。
+     * 用回调而不是在这里播，是因为播放器在主线程那边，Dart 侧已经有现成的
+     * 播放通道（CompanionVoice），没必要再养一个。
+     *
+     * 两段录音用**同一个音源**、同一个 session 配置，唯一的变量是"放没放声音"。
+     */
     @android.annotation.SuppressLint("MissingPermission")
-    fun probeMatrix(ms: Int = 1200): Matrix? {
-        if (!probing.compareAndSet(false, true)) return null
+    fun measureEcho(
+        source: Int,
+        withAec: Boolean,
+        ms: Int,
+        play: () -> Unit,
+        stopPlay: () -> Unit,
+    ): EchoResult {
+        if (!probing.compareAndSet(false, true)) {
+            return EchoResult(-998.0, -998.0, false, sourceName(source))
+        }
         return try {
-            Matrix(
-                vcNoAec = probeLevel(MediaRecorder.AudioSource.VOICE_COMMUNICATION, false, ms),
-                vcAec = probeLevel(MediaRecorder.AudioSource.VOICE_COMMUNICATION, true, ms),
-                vrNoAec = probeLevel(MediaRecorder.AudioSource.VOICE_RECOGNITION, false, ms),
-            )
+            val rec = open(source, withAec) ?: return EchoResult(-998.0, -998.0, false, sourceName(source))
+            val aecOk = rec.aecOn
+            try {
+                // 先静默录一小段，作为底噪。
+                val silent = recordRms(rec.record, ms)
+
+                // 再边放边录。播放留 300ms 让它真的响起来（MediaPlayer 从 play()
+                // 到出声有一段准备时间），这段时间的样本不算进结果。
+                play()
+                Thread.sleep(350)
+                val playing = recordRms(rec.record, ms)
+                stopPlay()
+                Thread.sleep(200)
+
+                EchoResult(
+                    playingDb = playing,
+                    silentDb = silent,
+                    aecOn = aecOk,
+                    source = sourceName(source),
+                )
+            } finally {
+                rec.close()
+            }
         } finally {
             probing.set(false)
         }
     }
+
+    private class OpenRec(val record: AudioRecord, val effects: List<AudioEffect>, val aecOn: Boolean) {
+        fun close() {
+            runCatching { record.stop() }
+            runCatching { record.release() }
+            effects.forEach { runCatching { it.release() } }
+        }
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun open(source: Int, withAec: Boolean): OpenRec? {
+        val min = AudioRecord.getMinBufferSize(
+            VoiceprintRecorder.RATE,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+        )
+        if (min <= 0) return null
+        val r = runCatching {
+            AudioRecord(
+                source,
+                VoiceprintRecorder.RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                maxOf(min, VoiceprintRecorder.RATE / 5 * 2),
+            )
+        }.getOrNull() ?: return null
+        if (r.state != AudioRecord.STATE_INITIALIZED) {
+            r.release()
+            return null
+        }
+        val effects = ArrayList<AudioEffect>()
+        var aecOn = false
+        if (withAec) {
+            runCatching { AcousticEchoCanceler.create(r.audioSessionId) }.getOrNull()?.let { e ->
+                effects += e
+                aecOn = runCatching { e.enabled = true; e.enabled }.getOrDefault(false)
+            }
+        }
+        if (runCatching { r.startRecording() }.isFailure) {
+            effects.forEach { runCatching { it.release() } }
+            r.release()
+            return null
+        }
+        // 硬件 warm up：前 400ms 常常整段是 0，不能算进去。
+        val buf = ShortArray(1600)
+        var skipped = 0
+        val warm = VoiceprintRecorder.RATE * 400 / 1000
+        while (skipped < warm) {
+            val n = runCatching { r.read(buf, 0, buf.size) }.getOrDefault(-1)
+            if (n <= 0) break
+            skipped += n
+        }
+        return OpenRec(r, effects, aecOn)
+    }
+
+    /** 从已经开着的 record 读 [ms] 毫秒，返回 RMS（dBFS）。 */
+    private fun recordRms(r: AudioRecord, ms: Int): Double {
+        val frames = VoiceprintRecorder.RATE * ms / 1000
+        val buf = ShortArray(1600)
+        var sum = 0.0
+        var count = 0
+        var silent = 0
+        val deadline = System.currentTimeMillis() + ms + 800
+        while (count < frames && System.currentTimeMillis() < deadline) {
+            val n = runCatching { r.read(buf, 0, buf.size) }.getOrDefault(-1)
+            if (n <= 0) break
+            for (i in 0 until n) {
+                val v = buf[i]
+                if (v == 0.toShort()) silent++
+                val f = v / 32768.0
+                sum += f * f
+                count++
+            }
+        }
+        if (count == 0) return -998.0
+        // 超过 95% 是 0：这一路根本没在采，报个特殊值，别当成"很安静"。
+        if (silent.toDouble() / count > 0.95) return -997.0
+        return 20 * log10(maxOf(sqrt(sum / count), 1e-12))
+    }
+
+    private val probing = AtomicBoolean(false)
 
     /** 给 Dart 的 map：字段名同为 wire 风格。 */
     fun Report.toMap(): Map<String, Any?> = mapOf(
