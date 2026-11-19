@@ -27,10 +27,14 @@ class RecordedAudio {
     required this.loudness,
     required this.noisiness,
     required this.floor,
+    this.clipPath,
   });
 
   /// 16k mono，-1..1。
   final Float32List samples;
+
+  /// 原生存下来的 wav 路径，可回放。没存成时为 null。
+  final String? clipPath;
   final int milliseconds;
 
   /// RMS 的 dBFS；低于 -38 算太小声。
@@ -161,6 +165,7 @@ class VoiceprintChannel {
         loudness: (raw['loudness'] as num?)?.toDouble() ?? -120,
         noisiness: (raw['noisiness'] as num?)?.toDouble() ?? 0,
         floor: (raw['floor'] as num?)?.toDouble() ?? -120,
+        clipPath: raw['clip'] as String?,
       );
     } on PlatformException {
       return null;

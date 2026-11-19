@@ -34,6 +34,10 @@ class _VoiceprintEnrollPageState extends ConsumerState<VoiceprintEnrollPage> {
   int _step = 0;
   bool _recording = false;
   bool _busy = false;
+
+  /// 最近一次录音存下来的 wav 路径。存进模板，好让以后能回放
+  /// "当时到底录到了什么"。
+  String? _lastClip;
   String? _hint;
   Timer? _ticker;
   int _left = _seconds;
@@ -271,6 +275,7 @@ class _VoiceprintEnrollPageState extends ConsumerState<VoiceprintEnrollPage> {
       setState(() => _hint = context.l10n.speechVoiceprintTooShort);
       return;
     }
+    _lastClip = result.clipPath;
     final problem = _problemWith(result, context.l10n);
     if (problem != null) {
       setState(() {
@@ -433,6 +438,7 @@ class _VoiceprintEnrollPageState extends ConsumerState<VoiceprintEnrollPage> {
           createdAt: DateTime.now(),
           vector: merged,
           source: _source,
+          clipPath: _lastClip ?? '',
         ),
       );
       if (mounted) Navigator.of(context).pop();

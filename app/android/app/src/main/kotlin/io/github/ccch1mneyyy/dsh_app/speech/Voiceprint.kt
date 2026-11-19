@@ -101,10 +101,24 @@ object Voiceprint {
         )
     }
 
+    /**
+     * 这段音频里"像在说话"的比例（0..1）。
+     *
+     * 为什么整条链路都要查：送进模型的永远是固定长度的窗口，但人可能只说
+     * 其中一小段，剩下的空白照样被算 embedding。空白与空白算出来的向量
+     * 几乎相同，余弦接近 1——实测就出现过没说话却报 0.803"本人"。
+     * 那不是认错人，是把两段静音都算成了同一件事。
+     *
+     * 唤醒和实景测试原本各自绕过这层检查，一起补上。
+     */
+    fun voicedFraction(samples: FloatArray): Double = SpeakerGate.voicedFraction(samples)
+
     /** 唤醒命中时用这一段判"是谁"。返回 false 表示不该答应。 */
     fun isKnownVoice(samples: FloatArray): Boolean {
         val c = cutoffs(Thresholds.Gate.WAKE)
         if (!c.enabled) return true
+        // 近乎空白的段不参与比对：拿它算出来的高分没有意义。
+        if (voicedFraction(samples) < SpeakerGate.MIN_VOICED_FRACTION) return false
         val vector = embedder?.embed(samples) ?: return true
         val list = profiles.get()
         if (list.isEmpty()) return true

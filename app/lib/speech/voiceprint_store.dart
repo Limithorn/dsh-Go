@@ -46,6 +46,7 @@ class VoiceProfile {
     required this.vector,
     this.label = '',
     this.source = VoiceProfileSource.call,
+    this.clipPath = '',
   });
 
   /// 稳定 id：录入那一刻生成，删除/覆盖都认它。
@@ -59,6 +60,13 @@ class VoiceProfile {
   /// 192 维、已 L2 归一化。
   final Float32List vector;
 
+  /// 录入那一刻的原始录音（wav 路径），可回放。
+  ///
+  /// 空串表示这份是旧版本录的、当时还没存音频——那种就放不了。
+  /// 存这个的理由：排查"为什么认不出来"时，最需要知道的是"当时到底
+  /// 录到了什么"。实测就遇到过录进去一半是空白、向量照算不误的情况。
+  final String clipPath;
+
   /// 这份模板是用哪种音源录的。
   ///
   /// 同一句话，通话里（AEC + 降噪）和唤醒时（不处理）拿到的是两段电平差
@@ -69,12 +77,13 @@ class VoiceProfile {
   /// 采集方式，语义正好对上。
   final VoiceProfileSource source;
 
-  VoiceProfile copyWith({String? label, VoiceProfileSource? source}) => VoiceProfile(
+  VoiceProfile copyWith({String? label, VoiceProfileSource? source, String? clipPath}) => VoiceProfile(
     id: id,
     label: label ?? this.label,
     createdAt: createdAt,
     vector: vector,
     source: source ?? this.source,
+    clipPath: clipPath ?? this.clipPath,
   );
 
   Map<String, Object?> toJson() => {
@@ -82,6 +91,7 @@ class VoiceProfile {
     'label': label,
     'createdAt': createdAt.millisecondsSinceEpoch,
     'vector': base64Encode(_bytesOf(vector)),
+    'clip': clipPath,
     'source': source.wire,
   };
 
@@ -101,6 +111,7 @@ class VoiceProfile {
         createdAt: DateTime.fromMillisecondsSinceEpoch(at),
         vector: floats,
         source: VoiceProfileSource.of(raw['source'] as String?),
+        clipPath: raw['clip'] is String ? raw['clip'] as String : '',
       );
     } on Object {
       return null;
