@@ -35354,6 +35354,30 @@ abstract class L10n {
   /// **'偏小'**
   String get speechVoiceprintMicQuiet;
 
+  /// No description provided for @speechCallMicSource.
+  ///
+  /// In zh, this message translates to:
+  /// **'通话收音'**
+  String get speechCallMicSource;
+
+  /// No description provided for @speechCallMicAuto.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动'**
+  String get speechCallMicAuto;
+
+  /// No description provided for @speechCallMicComm.
+  ///
+  /// In zh, this message translates to:
+  /// **'通话'**
+  String get speechCallMicComm;
+
+  /// No description provided for @speechCallMicRecog.
+  ///
+  /// In zh, this message translates to:
+  /// **'识别'**
+  String get speechCallMicRecog;
+
   /// No description provided for @speechVoiceprintMicFaint.
   ///
   /// In zh, this message translates to:

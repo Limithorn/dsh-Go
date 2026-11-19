@@ -84,6 +84,7 @@ typedef CallChoices = ({
   CallBargeSensitivity sensitivity,
   bool voiceprint,
   bool voiceprintOthers,
+  CallMicSource callMicSource,
 });
 
 /// One exchange of the call as it reads: what the person said, and her reply
@@ -139,6 +140,9 @@ class VoiceCallController extends ChangeNotifier {
   bool _bargeIn = true;
   CallPause _pause = CallPause.normal;
   CallBargeSensitivity _sensitivity = CallBargeSensitivity.normal;
+
+  /// 通话采集走哪一路声音，见 [CallMicSource]。
+  CallMicSource _micSource = CallMicSource.auto;
 
   /// 只认这几个人的声音。关着时下面三个字段都不参与判定，行为与以前逐字节一致。
   bool _voiceprint = false;
@@ -289,6 +293,7 @@ class VoiceCallController extends ChangeNotifier {
     _bargeIn = chosen.bargeIn;
     _pause = chosen.pause;
     _sensitivity = chosen.sensitivity;
+    _micSource = chosen.callMicSource;
     _voiceprint = chosen.voiceprint;
     _othersMayInterrupt = chosen.voiceprintOthers;
     _speaker = chosen.speaker;
@@ -323,6 +328,7 @@ class VoiceCallController extends ChangeNotifier {
       bargeIn: _bargeIn,
       pause: _pause,
       sensitivity: _sensitivity,
+      micSource: _micSource,
     );
     if (_disposed || _phase == CallPhase.ended) {
       if (started == CallStart.ok) unawaited(audio.stopCall());

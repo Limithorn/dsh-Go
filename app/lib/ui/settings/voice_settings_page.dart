@@ -507,6 +507,26 @@ class _VoiceprintSection extends ConsumerWidget {
               ? (mic) => unawaited(calls.edit((saved) => saved.copyWith(voiceprintMic: mic)))
               : null,
         ),
+        SettingsSegmentTile<CallMicSource>(
+          key: const ValueKey('voiceprint-call-mic-source'),
+          title: l10n.speechCallMicSource,
+          // 有些机器（实测 Sony）在通话音源上降噪过狠，说话峰值只有 −74 dBFS，
+          // 而同一麦克风走识别音源是 −20.8。那种情况只能放弃 AEC 换电平。
+          subtitle: call.callMicSource == CallMicSource.auto
+              ? '自动：通话那一路比识别低 20dB 以上就换掉'
+              : call.callMicSource == CallMicSource.communication
+              ? '带回声消除，自己播的声音不会漏回来；但有些机器会把人声也压掉'
+              : '不降噪、电平高，但自己播的声音会漏回来——靠插话灵敏度去挡',
+          segments: [
+            PillSegment(CallMicSource.auto, l10n.speechCallMicAuto),
+            PillSegment(CallMicSource.communication, l10n.speechCallMicComm),
+            PillSegment(CallMicSource.recognition, l10n.speechCallMicRecog),
+          ],
+          selected: call.callMicSource,
+          onChanged: on
+              ? (src) => unawaited(calls.edit((saved) => saved.copyWith(callMicSource: src)))
+              : null,
+        ),
       ],
     );
   }

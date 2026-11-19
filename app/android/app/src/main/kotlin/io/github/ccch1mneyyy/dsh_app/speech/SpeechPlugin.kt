@@ -7,6 +7,7 @@ import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.MediaRecorder
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -60,6 +61,31 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
     private var capture: CallCapture? = null
 
     // 实景测试状态。只活在一次测试里，和通话无关。
+    /**
+     * 通话采集的音源偏好，由 Dart 侧的 CallMicSource 送来。
+     * auto / communication / recognition。
+     */
+    @Volatile private var callMicSource: String = "auto"
+
+    /**
+     * 自动判断是否该放弃通话那一路。
+     *
+     * 只在"通话那路明显听不见人"时换：实测 Sony 上 VC 是 −74.1 dBFS 而 VR 是
+     * −20.8，差 53 dB。差 20 dB 以上就认为通那一路被降噪吃掉了。
+     *
+     * 量一次就够，不缓存：这不是性能敏感的路径，而且用户可能换机器。
+     */
+    private fun autoPickRecognition(): Boolean {
+        val peaks = runCatching { VoiceprintRecorder.probeSources() }.getOrNull() ?: return false
+        val vc = peaks["VOICE_COMMUNICATION"] ?: return false
+        val vr = peaks["VOICE_RECOGNITION"] ?: return false
+        // -999 / -998 是打不开的错误码，别拿它们比。
+        if (vc <= -900 || vr <= -900) return false
+        val useVr = vr - vc > 20.0
+        Log.i("SpeechPlugin", "call mic auto: vc=${"%.1f".format(vc)} vr=${"%.1f".format(vr)} -> ${if (useVr) "recognition" else "communication"}")
+        return useVr
+    }
+
     private var startedScreenTest = false
     private var screenTestSaved = 0
     private val screenTestDir: File
@@ -140,13 +166,17 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                 if (s != null && s.id == call.argument<String>("id")) s.duck(call.argument<Boolean>("on") == true)
                 result.success(null)
             }
-            "callStart" -> result.success(
-                startCall(
-                    call.argument<Boolean>("bargeIn") ?: true,
-                    TurnPause.of(call.argument<String>("pause")),
-                    call.argument<Double>("bargeOffset")?.toFloat() ?: 0f,
-                ),
-            )
+            "callStart" -> {
+                // 通话采集音源偏好，在开会话之前定下来。
+                callMicSource = call.argument<String>("micSource") ?: "auto"
+                result.success(
+                    startCall(
+                        call.argument<Boolean>("bargeIn") ?: true,
+                        TurnPause.of(call.argument<String>("pause")),
+                        call.argument<Double>("bargeOffset")?.toFloat() ?: 0f,
+                    ),
+                )
+            }
             "callPause" -> {
                 capture?.pause = TurnPause.of(call.argument<String>("pause"))
                 result.success(null)
@@ -226,6 +256,54 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
             }
             // 实景测试：TTS 正在说话时量"能不能被打断"。
             // 只负责采集和判定；说什么由 Dart 侧用 TTS 放。
+            // ── AEC 诊断 ───────────────────────────────────────────────
+            // 逐层报告：ROM 说支持吗 / 拿到对象了吗 / 真启用了吗 / 音源自不带。
+            // 13 和 14 上断在不同层，光看一个"开/关"判断不出来。
+            "aecReport" -> {
+                val fromCapture = capture?.lastAec ?: SpeakerScreenTest.lastAec
+                result.success(fromCapture?.let { AecSupport.run { it.toMap() } } ?: emptyMap<String, Any?>())
+            }
+            // 实测量一遍：同一段静默，三种配置各录一次，看 AEC 到底削掉多少。
+            // 这一步要 3 秒左右，界面自己等。
+            "aecProbe" -> {
+                if (capture != null || SpeakerScreenTest.isRunning) {
+                    result.success(mapOf("error" to "正在用麦克风，先停掉通话或测试"))
+                    return
+                }
+                val m = AecSupport.probeMatrix(call.argument<Int>("ms") ?: 1200)
+                result.success(
+                    if (m == null) {
+                        mapOf("error" to "测不了（可能并发调用）")
+                    } else {
+                        mapOf(
+                            "vcNoAec" to m.vcNoAec,
+                            "vcAec" to m.vcAec,
+                            "vrNoAec" to m.vrNoAec,
+                            "cut" to m.aecCut,
+                            "sdk" to android.os.Build.VERSION.SDK_INT,
+                            "sourceName" to AecSupport.sourceName(MediaRecorder.AudioSource.VOICE_COMMUNICATION),
+                        )
+                    },
+                )
+            }
+            // 单个音源 + 开关 AEC 的量测，给"对比"按钮用。
+            "aecLevel" -> {
+                if (capture != null || SpeakerScreenTest.isRunning) {
+                    result.success(-999.0)
+                    return
+                }
+                result.success(
+                    AecSupport.probeLevel(
+                        when (call.argument<String>("source")) {
+                            "recognition" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
+                            "mic" -> MediaRecorder.AudioSource.MIC
+                            else -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
+                        },
+                        call.argument<Boolean>("withAec") == true,
+                        call.argument<Int>("ms") ?: 1200,
+                    ),
+                )
+            }
             "screenTestStart" -> {
                 if (capture != null) {
                     // 通话中不抢麦克风。
@@ -470,6 +548,16 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
         }
         c.bargeIn = bargeIn
         c.pause = pause
+        // 通话采集走哪一路。auto 时按实测电平自己选，见 CallMicSource。
+        c.preferredSource = when (callMicSource) {
+            "recognition" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
+            "communication" -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
+            else -> if (autoPickRecognition()) {
+                MediaRecorder.AudioSource.VOICE_RECOGNITION
+            } else {
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION
+            }
+        }
         bargeOffset = offset
         c.bargeOffset = offset
         val am = audio

@@ -9,7 +9,7 @@ import 'companion/companion_initiative_owner.dart' show companionInitiativeProvi
 import 'companion/companion_voice_source.dart'
     show CompanionVoiceSource, companionVoiceSettingsProvider, warmLocalTts;
 import 'state/voice_call_host.dart';
-import 'speech/speech_settings.dart' show speechVoiceSettingsProvider, CallSettingsController;
+import 'speech/speech_settings.dart' show speechVoiceSettingsProvider, CallSettingsController, callSettingsProvider;
 import 'l10n/l10n.dart';
 import 'performance/performance_state.dart';
 import 'performance/refresh_rate.dart';
@@ -80,6 +80,12 @@ class _DshAppState extends ConsumerState<DshApp> with WidgetsBindingObserver {
     CallSettingsController.onVoiceprintChanged = (_, _) {
       unawaited(VoiceCallHost.pushVoiceprintNow(ref.container));
     };
+    // 再补一次：读盘可能比挂钩子还早完成（_load 是异步的，但 SharedPreferences
+    // 命中缓存时几乎立刻返回），那次通知就没人接。等它读完，按当前状态推一遍。
+    unawaited(ref.read(callSettingsProvider.notifier).ready().then((_) {
+      if (!mounted) return;
+      unawaited(VoiceCallHost.pushVoiceprintNow(ref.container));
+    }));
     // Start loading the stored tile style now, so 全部功能 opens in it rather
     // than flashing the default first.
     ref.read(tileStyleProvider);

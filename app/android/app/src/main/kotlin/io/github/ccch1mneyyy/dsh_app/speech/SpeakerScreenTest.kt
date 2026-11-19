@@ -4,9 +4,7 @@ import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
-import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.AudioEffect
-import android.media.audiofx.NoiseSuppressor
 import android.util.Log
 import java.io.File
 import java.nio.ByteBuffer
@@ -46,6 +44,10 @@ internal object SpeakerScreenTest {
 
     /** 采集时 AEC 是否真的挂上了。false 表示回声没被削，分数会虚高。 */
     @Volatile var echoCancelled: Boolean = false
+        private set
+
+    /** 这次采集的 AEC 详情，界面上逐层显示。 */
+    @Volatile internal var lastAec: AecSupport.Report? = null
         private set
 
     val isRunning: Boolean get() = running.get()
@@ -113,23 +115,10 @@ internal object SpeakerScreenTest {
         // 和 CallCapture 完全一样地挂效果器：测试要反映通话时的真实条件。
         // 顺带量出"AEC 到底有没有生效"——Sony 之类的 ROM 上，
         // isAvailable 是 true 但 create 返回 null 是常见事。
-        echoCancelled = false
         val effects = ArrayList<AudioEffect>()
-        if (runCatching { AcousticEchoCanceler.isAvailable() }.getOrDefault(false)) {
-            runCatching { AcousticEchoCanceler.create(record.audioSessionId) }.getOrNull()?.let { e ->
-                effects += e
-                echoCancelled = runCatching {
-                    e.enabled = true
-                    e.enabled
-                }.getOrDefault(false)
-            }
-        }
-        if (runCatching { NoiseSuppressor.isAvailable() }.getOrDefault(false)) {
-            runCatching { NoiseSuppressor.create(record.audioSessionId) }.getOrNull()?.let { e ->
-                effects += e
-                runCatching { e.enabled = true }
-            }
-        }
+        val report = AecSupport.attach(record, effects)
+        echoCancelled = report.effective
+        lastAec = report
 
         if (runCatching { record.startRecording() }.isFailure ||
             record.recordingState != AudioRecord.RECORDSTATE_RECORDING

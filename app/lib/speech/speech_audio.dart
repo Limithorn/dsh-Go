@@ -151,6 +151,32 @@ enum VoiceprintLevel {
 /// - [voicedFraction] 要求多少比例的帧有声
 ///
 /// 默认档 [normal] 就是原来的 0.20 / 4.0 / 1e-10 / 0.20，没换设备的人不受影响。
+/// 通话时用哪一路声音来听人说话。
+///
+/// 两难：VOICE_COMMUNICATION 带 AEC（自己播的声音不会漏回来），但有些机器的
+/// 这条通路降噪过狠。实测 Sony Xperia：通话峰值 −74.1 dBFS，而同一个麦克风
+/// 走 VOICE_RECOGNITION 是 −20.8——差 53 dB，等于完全听不见人说话。
+///
+/// 那种机器上宁可不要 AEC 也得能听见人说话：代价是自己播放的声音会漏进来，
+/// 靠「播放时抬线」和插话灵敏度去挡。
+enum CallMicSource {
+  /// 自动：启动时量两种音源，通话那路低太多就换掉。
+  auto('auto', '自动'),
+  communication('communication', '通话（带降噪）'),
+  recognition('recognition', '识别（不降噪）');
+
+  const CallMicSource(this.wire, this.label);
+
+  final String wire;
+  final String label;
+
+  static CallMicSource of(String? wire) => switch (wire) {
+    'communication' => CallMicSource.communication,
+    'recognition' => CallMicSource.recognition,
+    _ => CallMicSource.auto,
+  };
+}
+
 enum VoiceprintMic {
   /// 正常手机：说话能到 −25dBFS 上下。
   normal('normal', percentile: 0.20, multiple: 4.0, absoluteFloor: 1e-10, voicedFraction: 0.20),
@@ -309,11 +335,13 @@ class SpeechAudio {
     required bool bargeIn,
     CallPause pause = CallPause.normal,
     CallBargeSensitivity sensitivity = CallBargeSensitivity.normal,
+    CallMicSource micSource = CallMicSource.auto,
   }) async =>
       switch (await _invoke<String>('callStart', {
         'bargeIn': bargeIn,
         'pause': pause.name,
         'offset': sensitivity.offset,
+        'micSource': micSource.wire,
       })) {
         'ok' => CallStart.ok,
         'permission' => CallStart.permission,
@@ -328,11 +356,13 @@ class SpeechAudio {
     required bool muted,
     CallPause pause = CallPause.normal,
     CallBargeSensitivity sensitivity = CallBargeSensitivity.normal,
+    CallMicSource micSource = CallMicSource.auto,
   }) async => switch (await _invoke<String>('callStart', {
     'bargeIn': bargeIn,
     'pause': pause.name,
     'muted': muted,
     'offset': sensitivity.offset,
+    'micSource': micSource.wire,
   })) {
     'ok' => CallStart.ok,
     'permission' => CallStart.permission,

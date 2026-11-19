@@ -20294,6 +20294,18 @@ class L10nEn extends L10n {
   String get speechVoiceprintMicQuiet => 'Quiet';
 
   @override
+  String get speechCallMicSource => 'Call mic';
+
+  @override
+  String get speechCallMicAuto => 'Auto';
+
+  @override
+  String get speechCallMicComm => 'Call';
+
+  @override
+  String get speechCallMicRecog => 'Recognition';
+
+  @override
   String get speechVoiceprintMicFaint => 'Very quiet';
 
   @override
