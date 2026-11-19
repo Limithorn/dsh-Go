@@ -173,7 +173,13 @@ class SpeakerGate(
             // 结论要开完口才攒得够音频，于是谁都开不了口——连自己人也打断不了。
             // 宁可偶尔放过一个旁人，也不能让功能看起来是坏的。
             // 与 allowOthers 无关：没认出来就不该替人做决定。
-            Kind.UNKNOWN -> SpeechGate.Edge.START
+            //
+            // **播放时例外**：这时候"认不准"最可能就是自己的回声。回声被 AEC
+            // 削过之后分数正好落在 accept 与 reject 之间（实现在 0.469，
+            // accept 0.531 / reject 0.451），于是被判 UNKNOWN 而放行——
+            // 表现就是"放着放着突然被打断"。外人的声音不会因为我在播放而变得
+            // 更难认，所以播放时收紧不会伤到真插话（真插话分数通常高得多）。
+            Kind.UNKNOWN -> if (playing) SpeechGate.Edge.NONE else SpeechGate.Edge.START
         }
     }
 
@@ -300,7 +306,9 @@ class SpeakerGate(
                 "SpeakerGate",
                 "skip: voiced=${"%.2f".format(voiced)} < $MIN_VOICED_FRACTION（近乎空白，不参与比对）",
             )
-            return Verdict(Kind.UNKNOWN, -1f, null, overPlayback = playing, atFrame = atFrame)
+            // 报 OTHER 而不是 UNKNOWN：UNKNOWN 会被放行（见下面 answer() 的说明），
+            // 而"这段里没人说话"绝不能成为打断的理由。
+            return Verdict(Kind.OTHER, -1f, null, overPlayback = playing, atFrame = atFrame)
         }
 
         val vector = embedder.embed(audio) ?: return null

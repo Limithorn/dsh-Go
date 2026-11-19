@@ -37,6 +37,19 @@ internal class CampplusEmbedder(
 
     /** 一段 16k mono、-1..1 的音频 → 单位向量；太短或算出空值时返回 null。 */
     fun embed(samples: FloatArray): FloatArray? {
+        // 全静音直接不给向量。
+        //
+        // 之前不管输什么都会算出一个向量：全 0 输入经 fbank/L2 之后得到一个
+        // 退化的东西，与任何模板的余弦都可能很高。实测踩过——整段 -240dB
+        // （纯 0）的窗口拿到过 0.849 的"本人"分。
+        //
+        // -65dBFS 作为门槛：实测这台 Xperia 说话在 -37~-42，真静音是 -240；
+        // 留 20dB 余量，避免把轻声的话也挡掉。
+        var energy = 0.0
+        for (v in samples) energy += v.toDouble() * v
+        val rmsDb = 10.0 * kotlin.math.log10(kotlin.math.max(energy / samples.size, 1e-24))
+        if (rmsDb < -65.0) return null
+
         val frames = fbank.compute(samples) ?: return null
         if (frames.isEmpty()) return null
         // 诊断：fbank 的形状与取值范围。算错了这里一眼能看出来
