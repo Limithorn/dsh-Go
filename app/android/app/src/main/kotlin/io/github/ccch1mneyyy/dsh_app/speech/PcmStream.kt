@@ -1,6 +1,7 @@
 package io.github.ccch1mneyyy.dsh_app.speech
 
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.Handler
@@ -31,6 +32,8 @@ class PcmStream(
     private val levels: Boolean,
     private val main: Handler,
     private val listener: Listener,
+    /** 读系统音量用；null 就不补偿（测试环境）。 */
+    private val audio: android.media.AudioManager? = null,
 ) {
     interface Listener {
         fun onStart(stream: PcmStream)
@@ -89,6 +92,7 @@ class PcmStream(
         // 不设 setStartThresholdInFrames：它会把轨钉在 FAST 输出上，通信模式切听筒时
         // 那条 FAST 轨不会跟着 setCommunicationDevice 迁到 earpiece。普通输出即可。
         track = t
+        applyLoudnessCompensation(t)
         thread = Thread({ run(t) }, "dsh-speech-pcm").also { it.start() }
         return true
     }
@@ -113,9 +117,47 @@ class PcmStream(
         queue.offer(END)
     }
 
+    /**
+     * 系统音量低的时候在轨上补一点。
+     *
+     * 为什么需要：Android 的音量曲线是厂商定的，普遍是"对数感"的——音量键
+     * 从 15 档拉到 7 档，听感掉得比 7/15 多得多，50% 以下会明显偏小。这条
+     * 不是我们能改的（改不了曲线），但可以在轨上乘一个系数把低档抬起来。
+     *
+     * 补偿用**平方根**而不是直接乘倒数：后者在最低档会把音乐里的本底噪声
+     * 一起放大到听得见，而 sqrt 在 50% 时只补到 1.41 倍、10% 时补到 3.16 倍，
+     * 听感上接近"线性"，又不至于把底噪糊上来。
+     *
+     * 上限 [MAX_BOOST]：再往上补容易在 100% 附近爆音，也不值得——真觉得小
+     * 就把音量键往上按。
+     */
+    private fun applyLoudnessCompensation(t: AudioTrack) {
+        val am = audio ?: return
+        val max = runCatching { am.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(0)
+        if (max <= 0) return
+        val cur = runCatching { am.getStreamVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(max)
+        val ratio = (cur.toDouble() / max).coerceIn(0.02, 1.0)
+        // 满档不动；越往下补得越多，但不超过 MAX_BOOST。
+        val boost = (1.0 / kotlin.math.sqrt(ratio)).coerceAtMost(MAX_BOOST)
+        if (boost > 1.001) {
+            runCatching { t.setVolume(boost.toFloat()) }
+            android.util.Log.i("PcmStream", "loudness: vol=$cur/$max boost=${"%.2f".format(boost)}")
+        }
+    }
+
     /** Quieter while the person may be speaking over it ([on]), or back to full. */
     fun duck(on: Boolean) {
-        runCatching { track?.setVolume(if (on) DUCKED else 1f) }
+        runCatching { track?.setVolume(if (on) DUCKED else currentGain()) }
+    }
+
+    /** duck 之后恢复要用的增益：补偿后的值，不是 1f。 */
+    private fun currentGain(): Float {
+        val am = audio ?: return 1f
+        val max = runCatching { am.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(0)
+        if (max <= 0) return 1f
+        val cur = runCatching { am.getStreamVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(max)
+        val ratio = (cur.toDouble() / max).coerceIn(0.02, 1.0)
+        return (1.0 / kotlin.math.sqrt(ratio)).coerceAtMost(MAX_BOOST).toFloat()
     }
 
     /** Silence now. Safe from any thread; the writer releases the track. */
@@ -233,5 +275,8 @@ class PcmStream(
 
         /** About −12 dB: still heard, out of the way of the person speaking. */
         const val DUCKED = 0.25f
+
+        /** 低音量补偿的上限倍数。再高容易在满档附近爆音。 */
+        const val MAX_BOOST = 3.0
     }
 }

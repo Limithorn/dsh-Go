@@ -34685,7 +34685,7 @@ abstract class L10n {
   /// No description provided for @speechCallBargeGuarded.
   ///
   /// In zh, this message translates to:
-  /// **'防误触'**
+  /// **'不易被打断'**
   String get speechCallBargeGuarded;
 
   /// No description provided for @speechCallSpoken.
@@ -35324,6 +35324,12 @@ abstract class L10n {
   /// **'严格'**
   String get speechVoiceprintStrict;
 
+  /// No description provided for @speechVoiceprintVeryStrict.
+  ///
+  /// In zh, this message translates to:
+  /// **'最严'**
+  String get speechVoiceprintVeryStrict;
+
   /// No description provided for @speechVoiceprintMic.
   ///
   /// In zh, this message translates to:
@@ -35849,13 +35855,13 @@ abstract class L10n {
   /// No description provided for @speechCallBargeResistant.
   ///
   /// In zh, this message translates to:
-  /// **'更防误触'**
+  /// **'很难被打断'**
   String get speechCallBargeResistant;
 
   /// No description provided for @speechCallBargeStubborn.
   ///
   /// In zh, this message translates to:
-  /// **'最防误触'**
+  /// **'几乎不被打断'**
   String get speechCallBargeStubborn;
 
   /// No description provided for @speechVoiceprintRetryThis.

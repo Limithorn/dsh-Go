@@ -63,6 +63,14 @@ object Voiceprint {
 
     val isReady: Boolean get() = embedder != null && !blocked
 
+    /**
+     * 直接算一段音频的向量。
+     *
+     * 实景测试用：它要一段一段地算、自己留音频，走不了 SpeakerGate 那条
+     * 回调链。模型没就绪时返回 null。
+     */
+    fun embed(samples: FloatArray): FloatArray? = embedder?.embed(samples)
+
     /** 当前门槛；人数变了要跟着变（去人后门槛回落）。 */
     fun cutoffs(gate: Thresholds.Gate = Thresholds.Gate.BARGE): SpeakerGate.Cutoffs {
         val list = profiles.get()
@@ -85,6 +93,11 @@ object Voiceprint {
             allowOthers = allowOthers,
             // 没有模板就不算开：判定需要比对对象。
             enabled = on && n > 0 && !blocked,
+            // 打断闸才有播放：外放时 AI 自己的声音会漏回麦克风，那段音频和
+            // 本人模板天然很像，会在 accept 线附近来回摆。抬一点线能把
+            // "回声刚过线"那批挡住，而真插话通常更响更清楚，不受影响。
+            // 唤醒闸不播放，不用抬。
+            playingBoost = if (gate == Thresholds.Gate.BARGE) PLAYING_BOOST else 0f,
         )
     }
 
@@ -183,6 +196,14 @@ object Voiceprint {
     /**
      * 给采集用的 gate。模型没就绪就返回 null，调用方退回原来的 gate。
      */
+    /**
+     * 播放时 accept 抬高多少。
+     *
+     * 0.05：实测外放漏回来的回声，分数通常比本人真说话低 0.03~0.08。
+     * 抬 0.05 能把大部分挡住；再往上会开始挡掉"轻声说"的真插话。
+     */
+    private const val PLAYING_BOOST = 0.05f
+
     /** 判定音频的落盘目录（排查用）。空串就不写。 */
     var dumpDir: String = ""
 

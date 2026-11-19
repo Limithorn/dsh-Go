@@ -123,7 +123,13 @@ enum CallBargeSensitivity {
 enum VoiceprintLevel {
   loose('loose'),
   normal('normal'),
-  strict('strict');
+  strict('strict'),
+
+  /// 最严：只认"非常像"的。
+  ///
+  /// 给多人共用一台机器、或旁人声音和自己接近的场景。代价是本人说轻一点、
+  /// 隔远一点就会被挡在外面。
+  veryStrict('veryStrict');
 
   const VoiceprintLevel(this.wire);
 

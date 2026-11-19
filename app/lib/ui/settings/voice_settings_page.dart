@@ -484,6 +484,7 @@ class _VoiceprintSection extends ConsumerWidget {
             PillSegment(VoiceprintLevel.loose, l10n.speechVoiceprintLoose),
             PillSegment(VoiceprintLevel.normal, l10n.speechVoiceprintNormal),
             PillSegment(VoiceprintLevel.strict, l10n.speechVoiceprintStrict),
+            PillSegment(VoiceprintLevel.veryStrict, l10n.speechVoiceprintVeryStrict),
           ],
           selected: call.voiceprintLevel,
           onChanged: on

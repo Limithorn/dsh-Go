@@ -8,7 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'companion/companion_initiative_owner.dart' show companionInitiativeProvider;
 import 'companion/companion_voice_source.dart'
     show CompanionVoiceSource, companionVoiceSettingsProvider, warmLocalTts;
-import 'speech/speech_settings.dart' show speechVoiceSettingsProvider;
+import 'state/voice_call_host.dart';
+import 'speech/speech_settings.dart' show speechVoiceSettingsProvider, CallSettingsController;
 import 'l10n/l10n.dart';
 import 'performance/performance_state.dart';
 import 'performance/refresh_rate.dart';
@@ -70,6 +71,15 @@ class _DshAppState extends ConsumerState<DshApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    // 声纹设置一改就推给原生，不必等下一通电话。
+    //
+    // 之前只在通话开始时推：设置页改完不打电话，原生那边一直是旧值，
+    // 诊断页上显示"设置 0.40 / 原生 0.50"——看着像设置没生效，实际是
+    // 压根没送过去。用静态钩子是为了不绕成 import 环（speech_settings
+    // 不认识 voice_call_host）。
+    CallSettingsController.onVoiceprintChanged = (_, _) {
+      unawaited(VoiceCallHost.pushVoiceprintNow(ref.container));
+    };
     // Start loading the stored tile style now, so 全部功能 opens in it rather
     // than flashing the default first.
     ref.read(tileStyleProvider);

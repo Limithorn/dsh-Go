@@ -58,6 +58,12 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
     private var focus: AudioFocusRequest? = null
 
     private var capture: CallCapture? = null
+
+    // 实景测试状态。只活在一次测试里，和通话无关。
+    private var startedScreenTest = false
+    private var screenTestSaved = 0
+    private val screenTestDir: File
+        get() = File(context.getExternalFilesDir(null), "screen-test").apply { mkdirs() }
     private var mic = 0
 
     /** 录入声纹时占着的麦克风（0 = 没占）。 */
@@ -176,6 +182,7 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                     level = when (call.argument<String>("level")) {
                         "loose" -> Thresholds.Level.LOOSE
                         "strict" -> Thresholds.Level.STRICT
+                        "veryStrict" -> Thresholds.Level.VERY_STRICT
                         else -> Thresholds.Level.NORMAL
                     },
                     list = list,
@@ -216,6 +223,48 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                 // 和设置页那份比对，就知道"改了的设置有没有送到原生"。
                 Voiceprint.warmUp(context.assets)
                 result.success(Voiceprint.describe())
+            }
+            // 实景测试：TTS 正在说话时量"能不能被打断"。
+            // 只负责采集和判定；说什么由 Dart 侧用 TTS 放。
+            "screenTestStart" -> {
+                if (capture != null) {
+                    // 通话中不抢麦克风。
+                    result.success(false)
+                    return
+                }
+                startedScreenTest = true
+                val ok = SpeakerScreenTest.start { w ->
+                    // 回调在采集线程上，转回主线程再往 Dart 送。
+                    // 默认留最近 6 段：够看清"哪一段出了问题"，又不至于把存储占满。
+                    if (screenTestSaved < SCREEN_TEST_KEEP) {
+                        screenTestSaved++
+                        runCatching {
+                            SpeakerScreenTest.writeWav(
+                                File(screenTestDir, "screen-${System.currentTimeMillis()}.wav"),
+                                w.audio,
+                            )
+                        }
+                    }
+                    main.post {
+                        methods.invokeMethod(
+                            "screenTestWindow",
+                            mapOf(
+                                "score" to w.score,
+                                "kind" to w.kind,
+                                "rms" to w.rms,
+                                "barged" to w.barged,
+                                    "aec" to SpeakerScreenTest.echoCancelled,
+                            ),
+                        )
+                    }
+                }
+                result.success(ok)
+            }
+            "screenTestStop" -> {
+                SpeakerScreenTest.stop()
+                startedScreenTest = false
+                result.success(screenTestDir.listFiles()?.sortedByDescending { it.lastModified() }
+                    ?.take(SCREEN_TEST_KEEP)?.map { it.absolutePath } ?: emptyList<String>())
             }
             "voiceprintEmbed" -> {
                 val samples = call.argument<FloatArray>("samples")
@@ -323,7 +372,10 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
         stream?.stop()
         // 路由由 route() 的通信模式切换负责，不在这条轨上做；建流只管把 PCM 按媒体
         // 用法播出来，增益归 STREAM_MUSIC。
-        val s = PcmStream(id, rate, forCall, levels, main, streamListener)
+        val s = PcmStream(
+            id, rate, forCall, levels, main, streamListener,
+            audio = context.getSystemService(android.media.AudioManager::class.java),
+        )
         if (!s.open()) return false
         stream = s
         if (!forCall && !requestFocus()) {
@@ -533,6 +585,14 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
     }
 
     companion object {
+        /**
+         * 一次实景测试最多留几段录音。
+         *
+         * 每段 1.5 秒、32KB。6 段够看清"哪一段出了问题"，又不至于占满存储；
+         * 要更多就再测一次。
+         */
+        private const val SCREEN_TEST_KEEP = 6
+
         private const val CHANNEL = "dsh/speech"
         private val HEADSETS = setOf(
             AudioDeviceInfo.TYPE_WIRED_HEADSET,
