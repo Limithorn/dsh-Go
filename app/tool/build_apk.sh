@@ -53,6 +53,15 @@ if [ -d "$JDK17" ]; then
 fi
 export PATH="$JAVA_HOME/bin:$PATH"
 export ANDROID_HOME="${ANDROID_HOME:-C:/Users/FELiCiTas/Desktop/AGENT/HANAKO/tools/android-sdk}"
+
+# 本地回环不要走代理。
+#
+# 这台机器上 HTTP(S)_PROXY 指向 127.0.0.1:52762。Gradle/Kotlin 编译进程之间
+# 走本地 socket 通信，被代理插一手就会 Connection reset——表现为编译卡死
+# 十几分钟然后把任务挂住。编译本身不需要外网。
+export NO_PROXY="localhost,127.0.0.1,::1"
+export no_proxy="$NO_PROXY"
+
 FLUTTER="${FLUTTER:-C:/Users/FELiCiTas/Desktop/AGENT/HANAKO/tools/flutter/flutter/bin/flutter.bat}"
 
 echo "  java: $("$JAVA_HOME/bin/java" -version 2>&1 | head -1)"
