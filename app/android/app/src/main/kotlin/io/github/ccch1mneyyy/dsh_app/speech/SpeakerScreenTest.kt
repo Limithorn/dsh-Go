@@ -135,6 +135,26 @@ internal object SpeakerScreenTest {
         val window = ShortArray(windowSamples)
         var filled = 0
 
+        // 丢掉开头的起音尖峰。
+        //
+        // AudioRecord 刚 startRecording 时，前 100~200ms 有一段强瞬态：
+        // 实测第一个窗口的帧序列是
+        //   -35.6, -41.3, -52.4, -61.9, -65.2, ...
+        // 起手一声 -35dB 然后急降，稳态在 -45~-50。这段尖峰不但把
+        // voicedFraction 的参考电平抬上去（于是空白也"够响"），还成了
+        // embedding 的主要成分——每次启动的尖峰形状都差不多，算出来的
+        // 向量自然相似。这就是"刚开头必判成本人"（0.76~0.78）的来源，
+        // 之后几个窗口（0.22~0.33）才是真实分数。
+        //
+        // 丢 400ms：够盖住起音瞬态，又不至于让第一个分数出来太晚。
+        var warm = 0
+        val warmTarget = RATE * 400 / 1000
+        while (warm < warmTarget && running.get()) {
+            val n = runCatching { record.read(buffer, 0, buffer.size) }.getOrDefault(-1)
+            if (n <= 0) break
+            warm += n
+        }
+
         try {
             while (running.get()) {
                 val n = runCatching { record.read(buffer, 0, buffer.size) }.getOrDefault(-1)
