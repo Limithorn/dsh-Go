@@ -55,6 +55,14 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
   /// 正在放第几段；-1 表示没在放。
   int _playing = -1;
 
+  /// 测试用哪个音源。
+  ///
+  /// 默认 comm —— 通话真实用的那一路，测它才有意义。
+  /// 但有的机器这一路电平极低（Pixel 4 实测 −74dBFS），录出来几乎全是
+  /// 静默，回听会以为"根本没录到"。切成 recognition 就能听到真实输入，
+  /// 用来区分"没人说话"和"这一路把声音吃了"。
+  String _source = 'comm';
+
   /// 让 TTS 一直说下去：说完一句接下一句，直到停。
   ///
   /// 用长句拼出来的，所以不会在等下一句的间隙把扬声器"停下"——那个间隙里
@@ -121,7 +129,11 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
       });
     });
 
-    final ok = await _channel.invokeMethod<bool>('screenTestStart') ?? false;
+    final ok = await _channel.invokeMethod<bool>(
+          'screenTestStart',
+          {'source': _source == 'recog' ? 'recognition' : _source},
+        ) ??
+        false;
     if (!ok) {
       if (mounted) setState(() => _running = false);
       if (mounted) setState(() => _note = '开不了采集（权限或被占用）');
@@ -191,6 +203,27 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
               subtitle: '识别灵敏度 ${call.voiceprintLevel.wire} · '
                   '收音 ${call.voiceprintMic.wire} · '
                   '外人插话${call.voiceprintOthers ? '开' : '关'}',
+            ),
+            SettingsSegmentTile<String>(
+              key: const ValueKey('screen-source'),
+              title: '测试音源',
+              subtitle: _source == 'comm'
+                  ? '通话那一路：和真实通话一致，但有的机器电平极低，录音几乎是静默'
+                  : _source == 'recog'
+                  ? '识别那一路：不降噪，能听到真实输入，但和通话时不是同一路'
+                  : '原始麦克风：最接近硬件，不带任何系统处理',
+              segments: const [
+                PillSegment('comm', '通话'),
+                PillSegment('recog', '识别'),
+                PillSegment('mic', '原始'),
+              ],
+              selected: _source,
+              onChanged: _running
+                  ? null
+                  : (v) => setState(() {
+                        _source = v;
+                        _clips = const [];
+                      }),
             ),
           ],
         ),
