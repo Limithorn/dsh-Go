@@ -324,6 +324,15 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                     return
                 }
                 startedScreenTest = true
+                // 测试音源：默认通话音源（通话真实用的那一路），可切到识别音源。
+                // 有的机器通话音源电平极低（Pixel 实测 −74dBFS），那时录出来
+                // 几乎是一片静默，回听会以为"没录到"。切成识别音源就能听到
+                // 真实输入，用来区分"没人说话"和"这一路把声音吃了"。
+                SpeakerScreenTest.source = when (call.argument<String>("source")) {
+                    "recognition" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
+                    "mic" -> MediaRecorder.AudioSource.MIC
+                    else -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
+                }
                 val ok = SpeakerScreenTest.start { w ->
                     // 回调在采集线程上，转回主线程再往 Dart 送。
                     // 默认留最近 6 段：够看清"哪一段出了问题"，又不至于把存储占满。

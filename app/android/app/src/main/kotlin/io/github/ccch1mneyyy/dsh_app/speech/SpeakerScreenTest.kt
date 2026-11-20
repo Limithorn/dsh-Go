@@ -37,7 +37,11 @@ internal object SpeakerScreenTest {
     private const val RATE = 16_000
     private const val FRAME_MS = 20
     private const val FRAME_SAMPLES = RATE / 1000 * FRAME_MS
-    private val windowSamples = WINDOW_MS / 1000 * RATE
+    // 整数除法会截断：1500/1000 得 1，再 ×16000 只有 1 秒的窗口。
+    // 一直是这个写法，所以实景测试的窗口其实是 1.0s，而 SpeakerGate 是
+    // 1.5s——两边的分数本来就不能直接比（注释里却写着"一致"）。
+    // 实测从录音文件大小反推：32044 字节 = 1.00 秒。
+    private val windowSamples = WINDOW_MS * RATE / 1000
 
     private val running = AtomicBoolean(false)
 
@@ -75,6 +79,18 @@ internal object SpeakerScreenTest {
      *
      * [onWindow] 每 1.5 秒回调一次，在工作线程上跑，不要在里面碰 UI。
      */
+
+    /**
+     * 测试用哪个音源。
+     *
+     * 默认 VOICE_COMMUNICATION——那是通话真实用的那一路，测它才有意义。
+     * 但有的机器（实测 Pixel 4）这条路电平只有 −74dBFS，录出来几乎是一片
+     * 静默，回听时"什么都没录到"就是这个原因，不是录音坏了。
+     * 换成 VOICE_RECOGNITION 能听到真实的麦克风输入，用来判断"到底是我
+     * 没说话、还是这一路把声音吃了"。
+     */
+    @Volatile var source: Int = MediaRecorder.AudioSource.VOICE_COMMUNICATION
+
     @SuppressLint("MissingPermission")
     fun start(onWindow: (Window) -> Unit): Boolean {
         if (running.getAndSet(true)) return false
@@ -99,7 +115,7 @@ internal object SpeakerScreenTest {
         }
         val record = try {
             AudioRecord(
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                source,
                 RATE,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
