@@ -24,7 +24,10 @@ import '../settings/settings_widgets.dart';
 ///
 /// 通话里每次开口的记录也留在下面，用来看真实场景和这里差多少。
 class VoiceprintDiagnosticsPage extends ConsumerStatefulWidget {
-  const VoiceprintDiagnosticsPage({super.key});
+  const VoiceprintDiagnosticsPage({super.key, this.embedded = false});
+
+  /// 装进 Tab 里：不画大标题，只留列表体。
+  final bool embedded;
 
   @override
   ConsumerState<VoiceprintDiagnosticsPage> createState() => _VoiceprintDiagnosticsPageState();
@@ -63,6 +66,7 @@ class _VoiceprintDiagnosticsPageState extends ConsumerState<VoiceprintDiagnostic
     final canTry = profiles.isNotEmpty && !_busy && !_recording;
 
     return AppPage.list(
+      showLargeTitle: !widget.embedded,
       title: l10n.speechVoiceprintDiagnostics,
       children: [
         // 现场试一句：整页最主要的东西，放在最上面。

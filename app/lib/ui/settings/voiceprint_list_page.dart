@@ -8,11 +8,8 @@ import '../../companion/companion_voice.dart';
 import '../../speech/voiceprint_store.dart';
 import '../shell/page_frame.dart';
 import '../settings/settings_widgets.dart';
-import 'aec_diagnostics_page.dart';
 import 'screen_test_page.dart';
-import 'speech_diagnostics_page.dart';
-import 'speech_self_test_page.dart';
-import 'voiceprint_diagnostics_page.dart';
+import 'voice_diagnostics_page.dart';
 import 'voiceprint_enroll_page.dart';
 
 /// 已录入的声音：最多 5 条，能改备注、能删、能再加一个。
@@ -91,41 +88,16 @@ class VoiceprintListPage extends ConsumerWidget {
           // 诊断入口放在最下面：它是给调阈值用的，不是日常操作。
           SettingsSection(
             children: [
+              // 三页合成一页三档：链路 / 声纹 / 回声。
+              //
+              // 原来三个独立入口，查一个问题要先想「该进哪页」，进去发现不对
+              // 再退出来进另一页。合成 Tab 之后切一下就换层。
               SettingsTile(
-                key: const ValueKey('voiceprint-diagnostics'),
-                title: l10n.speechVoiceprintDiagnostics,
+                key: const ValueKey('voice-diagnostics'),
+                title: '语音诊断',
+                subtitle: '链路每道闸的值、录一句看判成什么、AEC 断在哪一层',
                 onTap: () => unawaited(Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => const VoiceprintDiagnosticsPage()),
-                )),
-              ),
-              // 上面那页看"这次判定得了多少分"，这一页看"每一道闸的线画在哪"。
-              // 分数不对时先来这里——线画错了，分数再高也没用。
-              SettingsTile(
-                key: const ValueKey('speech-chain-diagnostics'),
-                title: '语音链路诊断',
-                subtitle: '采集、静默、打分、三道闸各自的当前值',
-                onTap: () => unawaited(Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => const SpeechDiagnosticsPage()),
-                )),
-              ),
-              // 上面两页是"看"，这一页是"跑"：当场把链路走一遍，不用打电话。
-              SettingsTile(
-                key: const ValueKey('speech-self-test'),
-                title: '语音自测',
-                subtitle: '不用打电话，逐项跑一遍看哪一环断了',
-                onTap: () => unawaited(Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => const SpeechSelfTestPage()),
-                )),
-              ),
-              // 上面几页都是静音条件下测的。自打断和插话困难只在扬声器
-              // 真的在响时才出现，必须有一个放声音来测的地方。
-              // AEC 单独一页：它断在不同的层，值得分开看。
-              SettingsTile(
-                key: const ValueKey('aec-diagnostics'),
-                title: '回声消除诊断',
-                subtitle: 'AEC 开没开、断在哪一层（Android 13/14 差别很大）',
-                onTap: () => unawaited(Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => const AecDiagnosticsPage()),
+                  MaterialPageRoute<void>(builder: (_) => const VoiceDiagnosticsPage()),
                 )),
               ),
               SettingsTile(

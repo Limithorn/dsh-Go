@@ -1,19 +1,17 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../companion/companion_voice.dart';
-import '../../nativemedia/speaker_gate_bridge.dart' show GainMeasurement, VoiceprintChannel;
 import '../../speech/call/scripted_conversation.dart';
-import '../../speech/speech_audio.dart';
 import '../../speech/speech_settings.dart';
 import '../../speech/voiceprint_store.dart';
 import '../../state/app_info.dart';
 import '../shell/page_frame.dart';
 import '../speech/voice_call_page.dart';
+import 'mic_capture_section.dart';
 import 'settings_widgets.dart';
 
 /// 实景测试：TTS 正在说话的时候，看人说话能不能打断。
@@ -105,14 +103,12 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
   StreamSubscription<CompanionVoiceEvent>? _sub;
   Timer? _speakTimer;
 
-  /// 正在录增益样本。
-  bool _measuringGain = false;
 
-  /// 上次量增益的结果。
-  GainMeasurement? _gainMeasure;
-
-  /// 增益那一格的临时说明（量失败、已保存之类）。
-  String? _gainNote;
+  /// 最近一个窗口的响度，喂给采集区的实时电平条。
+  ///
+  /// 用窗口的 rms 而不是另开一条流：窗口本来就每 1.5 秒来一次，够看出
+  /// 「现在说话有没有被收到」，再开一路采样只会让麦克风更抢。
+  double? _liveDb;
   int _turn = 0;
 
   @override
@@ -130,50 +126,6 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
     unawaited(_sub?.cancel());
     if (_running) unawaited(_stop());
     super.dispose();
-  }
-
-  /// 录 3 秒，按「正常说话该有多响」反推固定增益，存下来。
-  ///
-  /// 为什么不是每段自适应归一化：归一化按段内最大值缩放。AI 说话时，段内
-  /// 最大的是它自己的回声，一归一化就把回声拉到满格，底噪也一起抬上去，
-  /// 判定彻底失真。固定倍数只整体抬一截，段内的人声/回声/底噪比例原样保留。
-  ///
-  /// 量的时候要用**正常音量**说话，不要说悄悄话也不要在很吵的地方——
-  /// 算出来的倍数会照着那次的条件定，说小了倍数偏大（底噪也跟着放大），
-  /// 说大了倍数偏小（还是不够响）。
-  Future<void> _measureGain() async {
-    // 本页自己的采集和量增益会抢麦克风，先停。
-    if (_running) await _stop();
-    setState(() {
-      _measuringGain = true;
-      _gainNote = null;
-      _gainMeasure = null;
-    });
-    try {
-      final m = await VoiceprintChannel().measureGain(ms: 3000);
-      if (!mounted) return;
-      if (m == null) {
-        setState(() {
-          _measuringGain = false;
-          _gainNote = '这一段几乎没听到声音，没法算。检查麦克风权限，再正常音量说一句';
-        });
-        return;
-      }
-      // 算出来就用，同时存进设置——下次进 App 直接生效。
-      await VoiceprintChannel().setGain(m.gain);
-      await ref.read(callSettingsProvider.notifier).edit((saved) => saved.copyWith(micGain: m.gain));
-      if (!mounted) return;
-      setState(() {
-        _measuringGain = false;
-        _gainMeasure = m;
-        _gainNote = m.gain <= 1.001
-            ? '已经够响，保持不放大'
-            : '已设成 ${m.gain.toStringAsFixed(2)}×，'
-                '后面录声纹和通话都会先乘这个倍数';
-      });
-    } finally {
-      if (mounted && _measuringGain) setState(() => _measuringGain = false);
-    }
   }
 
   /// 拉起通话页，用真实链路测一遍。
@@ -223,6 +175,7 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
       _running = true;
       _turn = 0;
       _pick = null;
+      _liveDb = null;
     });
 
     _channel.setMethodCallHandler((call) async {
@@ -238,6 +191,7 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
       setState(() {
         _aec = m['aec'] == true;
         _windows.add(w);
+        _liveDb = w.rms > -120 ? w.rms : null;
       });
     });
 
@@ -331,6 +285,20 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
       title: '实景测试',
       subtitle: const Text('让我一直说话，你插话，看能不能打断'),
       children: [
+        MicCaptureSection(
+          source: call.callMicSource,
+          gain: call.micGain,
+          busy: _running,
+          liveDb: _liveDb,
+          onSource: _running
+              ? null
+              : (v) => unawaited(
+                    ref.read(callSettingsProvider.notifier).edit((saved) => saved.copyWith(callMicSource: v)),
+                  ),
+          onGain: (g) => unawaited(
+            ref.read(callSettingsProvider.notifier).edit((saved) => saved.copyWith(micGain: g)),
+          ),
+        ),
         SettingsSection(
           title: '这一版',
           children: [
@@ -340,49 +308,6 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
                   '收音 ${call.voiceprintMic.wire} · '
                   '外人插话${call.voiceprintOthers ? '开' : '关'}',
             ),
-            SettingsSegmentTile<CallMicSource>(
-              key: const ValueKey('screen-source'),
-              title: '收音（和通话同一个设置）',
-              subtitle: switch (call.callMicSource) {
-                CallMicSource.auto =>
-                  '自动：启动时量两路电平，通话那一路低 20dB 以上就换识别——和通话用的是同一次判断',
-                CallMicSource.communication =>
-                  '通话那一路：带 AEC，自己播的声音不会漏回来；但有的机器会把人声也压掉',
-                CallMicSource.recognition =>
-                  '识别那一路：不降噪、电平高，但自己播的声音会漏回来',
-              },
-              segments: const [
-                PillSegment(CallMicSource.auto, '自动'),
-                PillSegment(CallMicSource.communication, '通话'),
-                PillSegment(CallMicSource.recognition, '识别'),
-              ],
-              selected: call.callMicSource,
-              onChanged: _running
-                  ? null
-                  : (v) => unawaited(
-                        ref.read(callSettingsProvider.notifier).edit((saved) => saved.copyWith(callMicSource: v)),
-                      ),
-            ),
-            SettingsTile(
-              key: const ValueKey('screen-gain'),
-              title: '采集增益 ${call.micGain.toStringAsFixed(2)}×'
-                  '${call.micGain <= 1.001 ? '（没放大）' : '（约 +${(20 * (math.log(call.micGain) / math.ln10)).toStringAsFixed(1)} dB）'}',
-              subtitle: _gainNote ??
-                  '有的机器给第三方 App 的录音增益很低，人声太小、打断不了。'
-                      '点「量一下」说一句正常音量的话，我按 -18dBFS 反推一个固定倍数。'
-                      '用固定倍数而不是每段归一化：归一化会把 AI 的回声和底噪一起抬满，判定就失真了',
-              onTap: _measuringGain ? null : _measureGain,
-            ),
-            if (_measuringGain)
-              const SettingsTile(title: '正在录 3 秒……现在正常音量说一句话'),
-            if (_gainMeasure case final m?)
-              SettingsTile(
-                title: '这次量到 ${m.peakDb.toStringAsFixed(1)} dBFS'
-                    '${m.windows < 100 ? '（录音太短，结果可能不准）' : ''}',
-                subtitle: '建议 ${m.gain.toStringAsFixed(2)}×'
-                    '${m.gain <= 1.001 ? '——已经够响，不用放大' : '，即抬高约 ${(20 * (math.log(m.gain) / math.ln10)).toStringAsFixed(1)} dB'}'
-                    '${m.currentGain > 1.001 ? '\n注意：这次是在已放大 ${m.currentGain.toStringAsFixed(2)}× 的基础上量的，新值已折算' : ''}',
-              ),
             if (_pick case final p?)
               SettingsTile(
                 key: const ValueKey('screen-chosen-source'),

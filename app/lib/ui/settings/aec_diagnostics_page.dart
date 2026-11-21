@@ -22,7 +22,10 @@ import 'settings_widgets.dart';
 /// 13 上一般是第 3 层成功；14 上效果器常被挪进 audio HAL，第 2、3 层
 /// 失败但第 4 层仍然有效。只看"开没开"会把 14 误判成坏的。
 class AecDiagnosticsPage extends ConsumerStatefulWidget {
-  const AecDiagnosticsPage({super.key});
+  const AecDiagnosticsPage({super.key, this.embedded = false});
+
+  /// 装进 Tab 里：不画大标题，只留列表体。
+  final bool embedded;
 
   @override
   ConsumerState<AecDiagnosticsPage> createState() => _AecDiagnosticsPageState();
@@ -260,6 +263,7 @@ class _AecDiagnosticsPageState extends ConsumerState<AecDiagnosticsPage> {
     final sdk = (r?['sdk'] as num?)?.toInt() ?? 0;
 
     return AppPage.list(
+      showLargeTitle: !widget.embedded,
       title: '回声消除诊断',
       subtitle: const Text('AEC 到底开没开，断在哪一层'),
       children: [

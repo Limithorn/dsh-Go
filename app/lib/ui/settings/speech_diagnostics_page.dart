@@ -26,7 +26,10 @@ import 'settings_widgets.dart';
 ///
 /// 两者对不上 = 配置没送到；都对得上但还是不工作 = 算法本身的问题。
 class SpeechDiagnosticsPage extends ConsumerStatefulWidget {
-  const SpeechDiagnosticsPage({super.key});
+  const SpeechDiagnosticsPage({super.key, this.embedded = false});
+
+  /// 装进 Tab 里：不画大标题，只留列表体。
+  final bool embedded;
 
   @override
   ConsumerState<SpeechDiagnosticsPage> createState() => _SpeechDiagnosticsPageState();
@@ -110,6 +113,7 @@ class _SpeechDiagnosticsPageState extends ConsumerState<SpeechDiagnosticsPage> {
     }
 
     return AppPage.list(
+      showLargeTitle: !widget.embedded,
       title: '语音链路诊断',
       subtitle: const Text('这几项各自管什么、现在是什么值'),
       actions: [
