@@ -672,11 +672,28 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
         // 90 分位都低到听不见，说明这段没说话（或麦克风没给数据）。
         if (p90 < 1e-5) return null
 
-        val target = 0.125          // -18 dBFS
-        val gain = (target / p90).toFloat().coerceIn(1.0f, 32.0f)
+        // 目标 -30 dBFS 的 RMS，不是 -18。
+        //
+        // RMS 和峰值差得远：说话时峰值通常比 RMS 高 12~15dB。按 -18dBFS 的
+        // RMS 去凑，峰值会顶到 -1dB 附近——实测就是这么调到 0.857 的，稍微
+        // 大声一点就削顶，而削顶引入的失真对声纹特征是灾难性的。
+        // -30dBFS 的 RMS 对应峰值约 -18dBFS，留足余量。
+        val target = 0.0316         // -30 dBFS
+
+        // 段内实际峰值也参与：这段本来就很响就不该再乘。
+        //
+        // 取 99.9 分位而不是绝对最大值——绝对最大值常是爆音、磕碰，
+        // 一个尖峰就能把倍数压到 1，白白损失整段的提升空间。
+        val absVals = raw.map { kotlin.math.abs(it) }.sorted()
+        val peak = absVals[(absVals.size * 0.999).toInt().coerceAtMost(absVals.size - 1)]
+        val gainByRms = (target / p90).toFloat()
+        // 峰值顶到 0.6 就不再放大：留 4dB 余量，够应付忽然提高的嗓门。
+        val gainByPeak = if (peak > 0.6) (0.6 / peak).toFloat() else Float.MAX_VALUE
+        val gain = minOf(gainByRms, gainByPeak).coerceIn(1.0f, 32.0f)
         return mapOf(
             "gain" to gain.toDouble(),
             "peakP90" to p90,
+            "peak" to peak,
             "currentGain" to currentGain.toDouble(),
             "windows" to levels.size,
         )
