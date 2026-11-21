@@ -83,6 +83,9 @@ class VoiceCallHost extends ChangeNotifier {
       bias: settings.voiceprintBias,
       mic: settings.voiceprintMic,
     );
+    // 增益单独推：它不属于 voiceprint 那套配置（即便声纹关着，录音电平
+    // 偏低时通话页也受益），而且要在 configure 之后再设，免得被覆盖。
+    await VoiceprintChannel().setGain(settings.micGain);
   }
 
   /// 手动把当前设置推一次给原生。

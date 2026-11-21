@@ -9,6 +9,31 @@ import '../speech/speech_audio.dart' show VoiceprintMic;
 
 import '../speech/voiceprint_store.dart' show VoiceProfile, VoiceProfileSource;
 
+/// 一次「量增益」的结果。
+class GainMeasurement {
+  const GainMeasurement({
+    required this.gain,
+    required this.peakP90,
+    required this.currentGain,
+    required this.windows,
+  });
+
+  /// 建议采用的倍数（1.0~32.0）。
+  final double gain;
+
+  /// 这段录音的 90 分位电平（0~1）。拿最大值不行——那是磕碰咳嗽的孤立尖峰。
+  final double peakP90;
+
+  /// 量的时候已经在用的倍数。为 1.0 时 [gain] 才是绝对值。
+  final double currentGain;
+
+  /// 算了多少个 20ms 窗口，太少说明录音太短、结果不可信。
+  final int windows;
+
+  /// 90 分位电平换算成 dBFS，设置页拿它和「-18dBFS 目标」对比。
+  double get peakDb => peakP90 <= 0 ? -120 : 20 * math.log(peakP90) / math.ln10;
+}
+
 /// 白名单条目，送到原生做比对用：id 这里是 VoiceProfile.id，向量已归一化。
 class GateProfile {
   const GateProfile({required this.id, required this.vector});
@@ -104,6 +129,43 @@ class VoiceprintChannel {
       // 忽略。
     } on MissingPluginException {
       // 忽略。
+    }
+  }
+
+  /// 设采集固定增益倍数（1.0 = 不放大），返回原生实际采用的值。
+  Future<double> setGain(double gain) async {
+    try {
+      final v = await _channel.invokeMethod<num>('voiceprintGain', {'gain': gain});
+      return (v ?? 1.0).toDouble();
+    } on PlatformException {
+      return 1.0;
+    } on MissingPluginException {
+      return 1.0;
+    }
+  }
+
+  /// 录 [ms] 毫秒，算出「让正常说话达到目标响度」的固定倍数。
+  ///
+  /// 返回 null 表示这段录音不可用（太短、几乎没说话）——那种情况算出来的
+  /// 会是几十倍，乘上去只剩噪声，不能采用。
+  ///
+  /// 为什么用固定倍数而不是每段归一化：归一化按段内最大值缩放，AI 说话时
+  /// 段内最大的是回声，一归一化就把回声拉满、底噪一起抬上去。固定倍数只
+  /// 整体抬一截，人声/回声/底噪的比例原样保留。
+  Future<GainMeasurement?> measureGain({int ms = 3000}) async {
+    try {
+      final m = await _channel.invokeMethod<Map>('voiceprintGainMeasure', {'ms': ms});
+      if (m == null) return null;
+      return GainMeasurement(
+        gain: (m['gain'] as num?)?.toDouble() ?? 1.0,
+        peakP90: (m['peakP90'] as num?)?.toDouble() ?? 0,
+        currentGain: (m['currentGain'] as num?)?.toDouble() ?? 1.0,
+        windows: (m['windows'] as num?)?.toInt() ?? 0,
+      );
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
     }
   }
 

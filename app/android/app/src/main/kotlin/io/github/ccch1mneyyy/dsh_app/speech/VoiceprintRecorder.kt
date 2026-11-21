@@ -198,6 +198,11 @@ internal object VoiceprintRecorder {
                         floor = if (floor.isNaN()) db else minOf(floor, db)
                         seeded++
                     }
+                    // 录入也乘同一个固定增益。
+                    //
+                    // 两处必须一致：模板是放大后算的向量，判定时如果不再放大，
+                    // 同一个人的两段音频落在不同的幅度区间，余弦会掉下来。
+                    Voiceprint.applyGain(buffer, n)
                     synchronized(chunks) { chunks.add(buffer.copyOf(n)) }
                 }
             }

@@ -151,6 +151,7 @@ class CallSettings {
     this.callMicSource = CallMicSource.auto,
     this.voiceprintMic = VoiceprintMic.normal,
     this.voiceprintWake = false,
+    this.micGain = 1.0,
   });
 
   /// Speaking over her stops her (else what is said while she talks is ignored).
@@ -218,6 +219,14 @@ class CallSettings {
   /// 与其写死一套数换台机器就坏，不如让人选"我这台机器收得小"。
   final VoiceprintMic voiceprintMic;
 
+  /// 采集时的固定增益倍数，1.0 = 不放大。
+  ///
+  /// 由「量一下」按钮算出：录一段正常说话，按 -18dBFS 目标反推倍数。
+  /// 为什么固定而不是每段自适应：自适应按段内最大值缩放，AI 说话时最大的是
+  /// 回声，一归一化就把回声拉满、底噪一起抬上去，判定彻底失真。固定倍数只
+  /// 整体抬一截，人声/回声/底噪的比例原样保留。
+  final double micGain;
+
   CallSettings copyWith({
     bool? bargeIn,
     bool? spoken,
@@ -235,6 +244,7 @@ class CallSettings {
     double? voiceprintBias,
     CallMicSource? callMicSource,
     VoiceprintMic? voiceprintMic,
+    double? micGain,
   }) => CallSettings(
     bargeIn: bargeIn ?? this.bargeIn,
     spoken: spoken ?? this.spoken,
@@ -252,6 +262,7 @@ class CallSettings {
     voiceprintBias: voiceprintBias ?? this.voiceprintBias,
     callMicSource: callMicSource ?? this.callMicSource,
     voiceprintMic: voiceprintMic ?? this.voiceprintMic,
+    micGain: micGain ?? this.micGain,
   );
 }
 
@@ -304,6 +315,8 @@ class CallSettingsController extends Notifier<CallSettings> {
           (m) => m.wire == json['voiceprintMic'],
           orElse: () => VoiceprintMic.normal,
         ),
+        // 老版本没有这个键，落到 1.0（不放大），行为和以前一致。
+        micGain: ((json['micGain'] as num?)?.toDouble() ?? 1.0).clamp(1.0, 32.0),
       );
       // 读盘后主动推一次。
       //
@@ -347,7 +360,8 @@ class CallSettingsController extends Notifier<CallSettings> {
         previous.voiceprintLevel != next.voiceprintLevel ||
         previous.voiceprintBias != next.voiceprintBias ||
         previous.voiceprintMic != next.voiceprintMic ||
-        previous.callMicSource != next.callMicSource) {
+        previous.callMicSource != next.callMicSource ||
+        previous.micGain != next.micGain) {
       onVoiceprintChanged?.call(previous, next);
     }
     final prefs = await SharedPreferences.getInstance();
@@ -370,6 +384,7 @@ class CallSettingsController extends Notifier<CallSettings> {
         'voiceprintBias': next.voiceprintBias,
         'callMicSource': next.callMicSource.wire,
         'voiceprintMic': next.voiceprintMic.wire,
+        'micGain': next.micGain,
       }),
     );
   }

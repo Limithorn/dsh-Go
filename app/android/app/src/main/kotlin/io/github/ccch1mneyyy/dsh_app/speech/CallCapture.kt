@@ -186,6 +186,13 @@ class CallCapture(
                     if (++tick % 2 == 0) post(mine) { listener.onLevel(0.0) }
                     continue
                 }
+                // 固定增益：在算电平和判定之前放大。
+                //
+                // 必须放在最前面——levelOf 算出的电平、gate.consume 拿到的
+                // 波形、以及 utterance 存下的音频都得是放大后的，否则三处
+                // 看到的不是同一段信号。放大的只是幅度，段内的人声/回声/
+                // 底噪比例原样保留（这一点和归一化不同，归一化会把回声拉满）。
+                Voiceprint.applyGain(frame, frame.size)
                 val level = SpeechGate.levelOf(frame, frame.size)
                 pcmTap?.let { tap ->
                     val epoch = frameEpoch

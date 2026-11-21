@@ -230,6 +230,39 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                 capture?.currentGate()?.let { g -> (g as? SpeakerGate)?.configure(Voiceprint.cutoffs()) }
                 result.success(Voiceprint.describe())
             }
+            "voiceprintGain" -> {
+                // 只设值，不量。量要走一次真实录音，见 voiceprintGainMeasure。
+                Voiceprint.fixedGain = (call.argument<Double>("gain") ?: 1.0)
+                    .toFloat().coerceIn(1.0f, 32.0f)
+                result.success(Voiceprint.fixedGain)
+            }
+            "voiceprintGainMeasure" -> {
+                // 录一小段，按「正常说话该有多响」反推倍数。
+                //
+                // 为什么不就地归一化而是算一个固定倍数：归一化按段内最大值缩放，
+                // AI 说话时段内最大的是回声，一归一化就把回声拉到满格、底噪也
+                // 一起抬上去。固定倍数只整体抬一截，段内比例不变。
+                //
+                // 取 90 分位而不是最大值：最大值可能是磕碰、咳嗽造成的孤立尖峰，
+                // 拿它算会把倍数压得过低。90 分位更接近「说话时的正常响度」。
+                val done = result
+                val ms = (call.argument<Int>("ms") ?: 3000).coerceIn(1000, 10000)
+                Thread({
+                    val samples = runCatching { VoiceprintRecorder.start(VoiceprintRecorder.Source.CALL) }
+                        .getOrDefault(false)
+                    if (!samples) {
+                        main.post { done.success(null) }
+                        return@Thread
+                    }
+                    Thread.sleep(ms.toLong())
+                    // 注意：这里拿到的音频已经是乘过当前 fixedGain 的，所以要
+                    // 先用当前增益还原，再算新倍数——否则连量两次会越量越大。
+                    main.post {
+                        val audio = runCatching { VoiceprintRecorder.stop() }.getOrDefault(FloatArray(0))
+                        done.success(measureGain(audio, Voiceprint.fixedGain))
+                    }
+                }, "dsh-gain-measure").apply { isDaemon = true }.start()
+            }
             "voiceprintEnabled" -> {
                 Voiceprint.enabled = call.argument<Boolean>("enabled") == true
                 capture?.currentGate()?.let { g -> (g as? SpeakerGate)?.configure(Voiceprint.cutoffs()) }
@@ -601,6 +634,53 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
     }
 
     // ── Calls ─────────────────────────────────────────────────────────────
+
+    /**
+     * 从一段录音反推「让正常说话达到目标响度」的固定倍数。
+     *
+     * 目标 -18 dBFS：留出约 18dB 余量，够应付感叹、靠近麦克风的情况，
+     * 又不至于把安静说话者压得太低。
+     *
+     * [currentGain] 是这段音频已经被乘过的倍数，先除回去再算新值，
+     * 这样连量两次结果一样，不会累积放大。
+     *
+     * 返回 null 表示这段录音不可用（太短、几乎全静音）——那种情况算出来
+     * 的倍数会是几十倍，乘上去只剩噪声。
+     */
+    private fun measureGain(audio: FloatArray, currentGain: Float): Map<String, Any?>? {
+        if (audio.size < VoiceprintRecorder.RATE / 2) return null
+        // 还原到未放大的幅度，避免连续测量越量越大。
+        val raw = if (currentGain > 1.001f) audio.map { it / currentGain } else audio.toList()
+
+        // 每 20ms 一个窗口算 RMS，取 90 分位当作「正常说话时的响度」。
+        // 用分位而不是最大值：最大值常是磕碰、咳嗽的孤立尖峰。
+        val win = 320
+        val levels = ArrayList<Double>(raw.size / win + 1)
+        var i = 0
+        while (i + win <= raw.size) {
+            var acc = 0.0
+            for (k in i until i + win) {
+                val v = raw[k]
+                acc += v * v
+            }
+            levels.add(kotlin.math.sqrt(acc / win))
+            i += win
+        }
+        if (levels.isEmpty()) return null
+        levels.sort()
+        val p90 = levels[(levels.size * 0.9).toInt().coerceAtMost(levels.size - 1)]
+        // 90 分位都低到听不见，说明这段没说话（或麦克风没给数据）。
+        if (p90 < 1e-5) return null
+
+        val target = 0.125          // -18 dBFS
+        val gain = (target / p90).toFloat().coerceIn(1.0f, 32.0f)
+        return mapOf(
+            "gain" to gain.toDouble(),
+            "peakP90" to p90,
+            "currentGain" to currentGain.toDouble(),
+            "windows" to levels.size,
+        )
+    }
 
     private fun startCall(bargeIn: Boolean, pause: TurnPause, offset: Float = 0f): String {
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {

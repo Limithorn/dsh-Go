@@ -58,6 +58,47 @@ object Voiceprint {
     /** 唤醒也认声音。与 [enabled] 分开：通话和唤醒是两个独立的闸。 */
     @Volatile var wake: Boolean = false
 
+    /**
+     * 采集时的固定增益倍数。1.0 = 不放大。
+     *
+     * 为什么要有这个：Xperia 这类机器的 audio HAL 给第三方 App 的录音路径
+     * 配的增益很低（实测同一台机器，通话音源好时峰值 0.18、坏时只有 0.018，
+     * 差 10 倍），声纹分数就上不去、打断不了。
+     *
+     * 为什么是**固定**倍数而不是每段自适应归一化：
+     * - 归一化按段内最大值缩放。AI 说话时，段内最大的是回声，归一化会把
+     *   回声拉到满格，底噪一起抬上去，判定彻底失真。
+     * - 固定倍数不改变段内相对关系：人声和回声、底噪的比例原样保留，
+     *   只是整体抬一截。这正是想要的。
+     *
+     * 值由设置页「量一段正常说话」算出来（目标峰值 / 实测峰值），再存起来。
+     */
+    @Volatile var fixedGain: Float = 1f
+
+    /** 增益后允许的最高绝对值，防止把已经够响的信号削顶。 */
+    private const val GAIN_CEIL = 32000f
+
+    /**
+     * 就地乘增益。放大的同时削顶，避免 Short 溢出变成反相噪声。
+     *
+     * 削顶会引入失真，但只在「原始信号已经接近满幅」时发生——那种情况本来
+     * 也不缺电平，说明增益设得偏高，设置页会把它压回 1.0 附近。
+     */
+    fun applyGain(buf: ShortArray, count: Int) {
+        val g = fixedGain
+        if (g <= 1.001f) return
+        for (i in 0 until count) {
+            val v = buf[i] * g
+            // 显式截断成 Int 再转 Short：kotlin 的 Float.toShort() 已废弃，
+            // 且行为不直观（可能环绕成反相的噪声，而不是削顶）。
+            buf[i] = when {
+                v > GAIN_CEIL -> GAIN_CEIL.toInt().toShort()
+                v < -GAIN_CEIL -> (-GAIN_CEIL).toInt().toShort()
+                else -> v.toInt().toShort()
+            }
+        }
+    }
+
     /** 每次判定的回调（影子日志 / 调测页 / Dart 事件），由 [SpeechPlugin] 接上。 */
     @Volatile var onVerdict: ((SpeakerGate.Verdict) -> Unit)? = null
 
