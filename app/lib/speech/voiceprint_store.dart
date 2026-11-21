@@ -21,7 +21,8 @@ import '../nativemedia/speaker_gate_bridge.dart';
 enum VoiceProfileSource {
   call('call', '通话（有降噪）'),
   wake('wake', '唤醒（不降噪）'),
-  raw('raw', '原始麦克风');
+  raw('raw', '原始麦克风'),
+  unprocessed('unprocessed', '未处理（绕过系统音效）');
 
   const VoiceProfileSource(this.wire, this.label);
 

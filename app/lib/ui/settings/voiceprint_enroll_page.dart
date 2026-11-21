@@ -118,10 +118,14 @@ class _VoiceprintEnrollPageState extends ConsumerState<VoiceprintEnrollPage> {
                   ? '通话里带降噪，录这份用来打断。想让叫名字也认得，再录一份「唤醒」'
                   : _source == VoiceProfileSource.wake
                   ? '唤醒时不降噪，录这份用来叫名字。打破断还需要一份「通话」'
+                  : _source == VoiceProfileSource.unprocessed
+                  ? '规范上要求系统别处理这段信号。Xperia 的 HAL 对第三方录音压得很低，'
+                      '这一路最可能拿到正常电平'
                   : '不经任何处理，电平最高。一般用于对照，不建议当模板',
               segments: const [
                 PillSegment(VoiceProfileSource.call, '通话'),
                 PillSegment(VoiceProfileSource.wake, '唤醒'),
+                PillSegment(VoiceProfileSource.unprocessed, '未处理'),
               ],
               selected: _source,
               // 正在录的时候不让改：这一段的向量得和哪一路对得上，中途换就乱了。

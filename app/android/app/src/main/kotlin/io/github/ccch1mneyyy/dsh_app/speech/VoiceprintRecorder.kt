@@ -40,12 +40,26 @@ internal object VoiceprintRecorder {
         WAKE(MediaRecorder.AudioSource.VOICE_RECOGNITION, "wake"),
 
         /** 原始麦克风：不经过任何处理，电平最高，用于对照。 */
-        RAW(MediaRecorder.AudioSource.MIC, "raw");
+        RAW(MediaRecorder.AudioSource.MIC, "raw"),
+
+        /**
+         * 未处理：Android 7+ 的 UNPROCESSED 音源，规范要求「不做任何音频处理」。
+         *
+         * 为什么加它：Xperia 的 audio HAL 对第三方 App 的录音路径配了极低的
+         * 麦克风增益，还默认挂了噪声门（Sony 社区和 XDA 上有 Xperia 10 III、
+         * 1 V、Z2 的长期报告，实测低 20~25 dB）。UNPROCESSED 是唯一在规范层面
+         * 声明「别动我的信号」的音源，最有可能绕开那套处理。
+         *
+         * 对照实测：这台 XQ-CQ72 上 CALL 峰值 0.0186、WAKE 0.0271，而昨天
+         * 正常时是 0.09 上下——差 3~5 倍。
+         */
+        UNPROCESSED(MediaRecorder.AudioSource.UNPROCESSED, "unprocessed");
 
         companion object {
             fun of(wire: String?): Source = when (wire) {
                 "wake" -> WAKE
                 "raw" -> RAW
+                "unprocessed" -> UNPROCESSED
                 else -> CALL
             }
         }
@@ -218,7 +232,25 @@ internal object VoiceprintRecorder {
             copy
         }
         val total = all.sumOf { it.size }
-        Log.i(TAG, "stop: chunks=${all.size} samples=$total loudness=${if (total > 0) loudness(all.flat()) else -120.0}")
+        // 除响度外还要打 unique / peak / src。
+        //
+        // 只看 loudness 会把两种情况混成一种：实测一段 6 秒录音 loudness=-62.9，
+        // 看着像「声音小」，实际整段只有 82 个不同采样值、范围 [-78, 34]，
+        // 而正常录音是 2959 个值、峰值 3155。真因是 Xperia 的 HAL 把第三方
+        // 录音的增益压低且挂了噪声门，不是代码在丢数据——区分这两者只能靠
+        // 唯一值个数和峰值。
+        //
+        // src 一起打，是为了能直接对比不同音源：同一句话在 call / wake /
+        // unprocessed 下各录一段，峰值差多少一眼可见。
+        val flat = if (total > 0) all.flat() else FloatArray(0)
+        val uniq = if (flat.isNotEmpty()) flat.toSet().size else 0
+        val peak = if (flat.isNotEmpty()) flat.maxOf { kotlin.math.abs(it) } else 0f
+        Log.i(
+            TAG,
+            "stop: chunks=${all.size} samples=$total src=${source.name} " +
+                "loudness=${if (total > 0) loudness(flat) else -120.0} " +
+                "unique=$uniq peak=${"%.4f".format(peak)}",
+        )
         if (total == 0) return FloatArray(0)
         val out = FloatArray(total)
         var at = 0
