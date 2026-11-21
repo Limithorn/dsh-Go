@@ -33,7 +33,7 @@ import io.github.ccch1mneyyy.dsh_app.nativemedia.TurnPause
  * the bytes waiting to play, -1 when the stream is gone), `waiting` {id}, `end` {id}, `stop`. Opening a stream stops the one before. A `call` stream plays as voice
  * communication (so the echo canceller hears it); others as media, ducking other apps.
  *
- * Calls — `callStart` {bargeIn, pause} answers "ok", "permission" or "microphone"; `callStop`; `callMute`
+ * Calls — `callStart` {bargeIn, pause, micSource} answers "ok", "permission" or "microphone"; `callStop`; `callMute`
  * {on}; `callBargeIn` {on}; `callPause` {pause: quick|normal|patient}; `callPlaying` {on} (another player of the app's voice, such as the phone's
  * own text-to-speech, started or stopped); `callSpeaker` {on}. A call holds the app's one microphone
  * ([MicArbiter]). Routing (方案 D): the whole call stays in MODE_IN_COMMUNICATION and only the
@@ -43,6 +43,11 @@ import io.github.ccch1mneyyy.dsh_app.nativemedia.TurnPause
  * Only the vocoder path reaches the physical earpiece on vendor HALs (Pixel 4). Volume keys are
  * pinned to STREAM_VOICE_CALL in communication mode; whether they still drive this media track is
  * under A/B verification. The screen stays on meanwhile (a backgrounded app gets no microphone).
+ *
+ * Mic source — 通话和实景测试共用 [MicSource]：`micSource` / `source`（auto|communication|
+ * recognition|mic，缺省 auto）是唯一入口，auto 时按实测峰值决定，判据见 [MicSource.SWAP_DB]。
+ * `screenTestWindow` 每条都带 `source`（本轮实际打开的音源）；诊断用的
+ * `micSourceReport` 报两条路径各自的选择与依据，`micSourceProbe` 手动再量一次。
  *
  * Events come back as `event` calls with a `type`: `play` {what: start|done|stopped|error, id},
  * `playLevel` {id, value}, `speechStart` {over}, `utterance` {wav, ms}, `micLevel` {value},
@@ -64,29 +69,20 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
     /**
      * 通话采集的音源偏好，由 Dart 侧的 CallMicSource 送来。
      * auto / communication / recognition。
+     *
+     * 实景测试不再有自己的音源开关：两个入口（callStart 的 micSource、
+     * screenTestStart 的 source）是同一个设置的两个出口，都交给 [MicSource]。
      */
     @Volatile private var callMicSource: String = "auto"
 
+    @Volatile private var startedScreenTest = false
     /**
-     * 自动判断是否该放弃通话那一路。
+     * 每次 screenTestStart / screenTestStop 都加一。
      *
-     * 只在"通话那路明显听不见人"时换：实测 Sony 上 VC 是 −74.1 dBFS 而 VR 是
-     * −20.8，差 53 dB。差 20 dB 以上就认为通那一路被降噪吃掉了。
-     *
-     * 量一次就够，不缓存：这不是性能敏感的路径，而且用户可能换机器。
+     * 音源要在工作线程上量（auto 约 4.5 秒），量完才起采集。这中间用户可能已经
+     * 按了停止：靠这个序号确认"这一轮还是不是当前那一轮"，不是就别再开麦克风。
      */
-    private fun autoPickRecognition(): Boolean {
-        val peaks = runCatching { VoiceprintRecorder.probeSources() }.getOrNull() ?: return false
-        val vc = peaks["VOICE_COMMUNICATION"] ?: return false
-        val vr = peaks["VOICE_RECOGNITION"] ?: return false
-        // -999 / -998 是打不开的错误码，别拿它们比。
-        if (vc <= -900 || vr <= -900) return false
-        val useVr = vr - vc > 20.0
-        Log.i("SpeechPlugin", "call mic auto: vc=${"%.1f".format(vc)} vr=${"%.1f".format(vr)} -> ${if (useVr) "recognition" else "communication"}")
-        return useVr
-    }
-
-    private var startedScreenTest = false
+    @Volatile private var screenTestGeneration = 0
     private var screenTestSaved = 0
     private val screenTestDir: File
         get() = File(context.getExternalFilesDir(null), "screen-test").apply { mkdirs() }
@@ -263,6 +259,35 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                 val fromCapture = capture?.lastAec ?: SpeakerScreenTest.lastAec
                 result.success(fromCapture?.let { AecSupport.run { it.toMap() } } ?: emptyMap<String, Any?>())
             }
+            // 音源诊断：通话和实景测试各自最近一次选了哪一路，依据是量到的什么。
+            //
+            // 这一条是新增的（旧版 Dart 不会调，协议不算改）：诊断页要回答的是
+            // "两条路径收的是不是同一路声音"，光看设置里的档位答不了——auto 会
+            // 自己换路，而换路的依据是实测电平。
+            "micSourceReport" -> result.success(
+                MicSource.report() + mapOf<String, Any?>(
+                    "requested" to callMicSource,
+                    // 通话此刻真正打开的音源（没在通话就是 null），和设置对照用。
+                    "callOpened" to capture?.openedSource?.takeIf { it != 0 }
+                        ?.let { AecSupport.sourceName(it) },
+                    "screenOpened" to SpeakerScreenTest.source.takeIf { SpeakerScreenTest.isRunning }
+                        ?.let { AecSupport.sourceName(it) },
+                    "busy" to (capture != null || SpeakerScreenTest.isRunning || startedScreenTest || micVoiceprint != 0),
+                ),
+            )
+            // 手动量一遍音源（诊断页的按钮）。会真的开三条音源各录 1.5 秒，
+            // 所以放工作线程，并且麦克风被占着时直接拒绝。
+            "micSourceProbe" -> {
+                if (capture != null || SpeakerScreenTest.isRunning || startedScreenTest || micVoiceprint != 0) {
+                    result.success(mapOf("error" to "正在用麦克风，先停掉通话或测试"))
+                    return
+                }
+                val done = result
+                Thread({
+                    val pick = MicSource.probe()
+                    main.post { done.success(MicSource.toMap(pick) ?: emptyMap<String, Any?>()) }
+                }, "dsh-mic-source-probe").apply { isDaemon = true }.start()
+            }
             // AEC 量测：必须边放边测。
             //
             // 之前这里是"静默录三次"，完全测不出 AEC——AEC 拿正在播放的音频
@@ -272,7 +297,9 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
             // 现在：放一段扫频音，同时录，跟"不播放时的底噪"比。差值就是
             // 漏进来的回声。三种配置各来一次，能看出 AEC 和音源各自贡献多少。
             "aecEcho" -> {
-                if (capture != null || SpeakerScreenTest.isRunning || micVoiceprint != 0) {
+                // startedScreenTest 也算忙：实景测试刚开始时音源还在工作线程上量，
+                // 那几秒里麦克风同样被占着（isRunning 还没变 true）。
+                if (capture != null || SpeakerScreenTest.isRunning || startedScreenTest || micVoiceprint != 0) {
                     result.success(mapOf("error" to "正在用麦克风，先停掉通话或测试"))
                     return
                 }
@@ -318,49 +345,73 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                 result.success(out)
             }
             "screenTestStart" -> {
-                if (capture != null) {
-                    // 通话中不抢麦克风。
+                if (capture != null || startedScreenTest) {
+                    // 通话中不抢麦克风；已经在测也别再开一路。
+                    result.success(false)
+                    return
+                }
+                if (micVoiceprint != 0) {
+                    // 正在录声纹。等录完再测，否则两路抢同一个麦克风。
                     result.success(false)
                     return
                 }
                 startedScreenTest = true
-                // 测试音源：默认通话音源（通话真实用的那一路），可切到识别音源。
-                // 有的机器通话音源电平极低（Pixel 实测 −74dBFS），那时录出来
-                // 几乎是一片静默，回听会以为"没录到"。切成识别音源就能听到
-                // 真实输入，用来区分"没人说话"和"这一路把声音吃了"。
-                SpeakerScreenTest.source = when (call.argument<String>("source")) {
-                    "recognition" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
-                    "mic" -> MediaRecorder.AudioSource.MIC
-                    else -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
-                }
-                val ok = SpeakerScreenTest.start { w ->
-                    // 回调在采集线程上，转回主线程再往 Dart 送。
-                    // 默认留最近 6 段：够看清"哪一段出了问题"，又不至于把存储占满。
-                    if (screenTestSaved < SCREEN_TEST_KEEP) {
-                        screenTestSaved++
-                        runCatching {
-                            SpeakerScreenTest.writeWav(
-                                File(screenTestDir, "screen-${System.currentTimeMillis()}.wav"),
-                                w.audio,
-                            )
+                // 测试音源：和通话同一个决定。
+                //
+                // 从前这里把音源钉死在 VOICE_COMMUNICATION，页面上另有一套
+                // comm/recog/mic 开关，和设置里的「通话收音」各管各的：同一台
+                // 机器上实景测试收 VC、通话可能收 VR，分数没法互相印证。
+                // 现在两边都问 [MicSource]，设置里选什么、auto 量到什么，两边一样。
+                //
+                // auto 要开三条音源各量 1.5 秒（约 4.5 秒），放工作线程量完再
+                // 起采集，别卡住主线程。
+                val requested = call.argument<String>("source")
+                val done = result
+                val mine = ++screenTestGeneration
+                Thread({
+                    val pick = MicSource.resolve(requested, "screenTest")
+                    // 量这 4.5 秒里用户可能已经按了停止：那一轮就别再开麦克风了。
+                    if (mine != screenTestGeneration) {
+                        main.post { done.success(false) }
+                        return@Thread
+                    }
+                    val ok = runCatching {
+                        SpeakerScreenTest.start(pick.source) { w ->
+                            // 回调在采集线程上，转回主线程再往 Dart 送。
+                            // 默认留最近 6 段：够看清"哪一段出了问题"，又不至于把存储占满。
+                            if (screenTestSaved < SCREEN_TEST_KEEP) {
+                                screenTestSaved++
+                                runCatching {
+                                    SpeakerScreenTest.writeWav(
+                                        File(screenTestDir, "screen-${System.currentTimeMillis()}.wav"),
+                                        w.audio,
+                                    )
+                                }
+                            }
+                            main.post {
+                                methods.invokeMethod(
+                                    "screenTestWindow",
+                                    mapOf(
+                                        "score" to w.score,
+                                        "kind" to w.kind,
+                                        "rms" to w.rms,
+                                        "barged" to w.barged,
+                                        "aec" to SpeakerScreenTest.echoCancelled,
+                                        // 这一轮到底收的哪一路。页面直接显示，
+                                        // 不用再猜"这次是 auto 选的吗"。
+                                        "source" to pick.chosen,
+                                        "sourceRequested" to pick.requested,
+                                    ),
+                                )
+                            }
                         }
-                    }
-                    main.post {
-                        methods.invokeMethod(
-                            "screenTestWindow",
-                            mapOf(
-                                "score" to w.score,
-                                "kind" to w.kind,
-                                "rms" to w.rms,
-                                "barged" to w.barged,
-                                    "aec" to SpeakerScreenTest.echoCancelled,
-                            ),
-                        )
-                    }
-                }
-                result.success(ok)
+                    }.getOrDefault(false)
+                    if (!ok) startedScreenTest = false
+                    main.post { done.success(ok) }
+                }, "dsh-screen-test-source").apply { isDaemon = true }.start()
             }
             "screenTestStop" -> {
+                screenTestGeneration++
                 SpeakerScreenTest.stop()
                 startedScreenTest = false
                 result.success(screenTestDir.listFiles()?.sortedByDescending { it.lastModified() }
@@ -583,20 +634,14 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
             val base = SpeechGates.create(context.assets, echoCancelled, marks)
             Voiceprint.gateFor(base) ?: base
         }
+        bargeOffset = offset
         c.bargeIn = bargeIn
         c.pause = pause
-        // 通话采集走哪一路。auto 时按实测电平自己选，见 CallMicSource。
-        c.preferredSource = when (callMicSource) {
-            "recognition" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
-            "communication" -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
-            else -> if (autoPickRecognition()) {
-                MediaRecorder.AudioSource.VOICE_RECOGNITION
-            } else {
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION
-            }
-        }
-        bargeOffset = offset
         c.bargeOffset = offset
+        // 通话采集走哪一路：和实景测试同一个决定（[MicSource]），设置里的
+        // 「通话收音」是唯一入口。auto 时这里会真的开三条音源各量 1.5 秒
+        // （约 4.5 秒，同步发生在主线程上——和改动前一样，没在这里顺手改时序）。
+        c.preferredSource = MicSource.resolve(callMicSource, "call").source
         val am = audio
         // 方案 D：通话全程进通信模式（含免提）。只有通信模式把播放轨 remap 到
         // STRATEGY_PHONE / vocoder 链路，AEC 才能从「通信下行」抽到参考、消掉 AI

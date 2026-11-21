@@ -94,9 +94,14 @@ class CallCapture(
      * −74 dBFS，而同一个麦克风走 VOICE_RECOGNITION 是 −20.8——差 53 dB。
      * 那种情况下宁可不要 AEC 也得能听见人说话。
      *
-     * 由 Settings 里的「通话收音」控制，默认自动：启动时量一下，太低就换。
+     * 由 [SpeechPlugin] 用 [MicSource.resolve] 定好再传进来：和实景测试同一套
+     * 判据、同一个设置入口。这里只是执行，不做选择。
      */
     @Volatile var preferredSource: Int = MediaRecorder.AudioSource.VOICE_COMMUNICATION
+
+    /** 这次真正打开的音源（0 = 没在采）；诊断页拿它和设置里的档位对照。 */
+    @Volatile var openedSource: Int = 0
+        private set
 
     val active get() = record != null
 
@@ -133,6 +138,7 @@ class CallCapture(
         }
         record = r
         gate = g
+        openedSource = runCatching { r.audioSource }.getOrDefault(preferredSource)
         if (playing) g.setPlaying(true, SystemClock.elapsedRealtime())
         running = true
         val mine = ++session
@@ -239,6 +245,7 @@ class CallCapture(
     fun stop() {
         session++
         running = false
+        openedSource = 0
         val r = record ?: return
         record = null
         gate = null

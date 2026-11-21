@@ -75,26 +75,30 @@ internal object SpeakerScreenTest {
     )
 
     /**
+     * 本次测试用的音源。
+     *
+     * 由 [start] 的参数决定，而那个参数来自 [MicSource]——和通话走同一套选择
+     * （设置里的「通话收音」+ auto 的实测判断）。页面不再自己钉死音源，否则
+     * 两条路径收的不是同一路声音，分数不可比。
+     *
+     * 记下来只是为了诊断页能回答"这次到底开的哪一路"。
+     */
+    @Volatile var source: Int = MediaRecorder.AudioSource.VOICE_COMMUNICATION
+        private set
+
+    /**
      * 开始采集并判定。
+     *
+     * [source] 由 [SpeechPlugin] 用 [MicSource.resolve] 定好后传进来——auto 的
+     * 电平探测在那里做（约 4.5 秒），不占采集线程也不占主线程。
      *
      * [onWindow] 每 1.5 秒回调一次，在工作线程上跑，不要在里面碰 UI。
      */
-
-    /**
-     * 测试用哪个音源。
-     *
-     * 默认 VOICE_COMMUNICATION——那是通话真实用的那一路，测它才有意义。
-     * 但有的机器（实测 Pixel 4）这条路电平只有 −74dBFS，录出来几乎是一片
-     * 静默，回听时"什么都没录到"就是这个原因，不是录音坏了。
-     * 换成 VOICE_RECOGNITION 能听到真实的麦克风输入，用来判断"到底是我
-     * 没说话、还是这一路把声音吃了"。
-     */
-    @Volatile var source: Int = MediaRecorder.AudioSource.VOICE_COMMUNICATION
-
     @SuppressLint("MissingPermission")
-    fun start(onWindow: (Window) -> Unit): Boolean {
+    fun start(source: Int, onWindow: (Window) -> Unit): Boolean {
         if (running.getAndSet(true)) return false
-        val t = Thread({ loop(onWindow) }, "dsh-screen-test").apply { isDaemon = true }
+        this.source = source
+        val t = Thread({ loop(source, onWindow) }, "dsh-screen-test").apply { isDaemon = true }
         thread = t
         t.start()
         return true
@@ -107,7 +111,7 @@ internal object SpeakerScreenTest {
     }
 
     @SuppressLint("MissingPermission")
-    private fun loop(onWindow: (Window) -> Unit) {
+    private fun loop(source: Int, onWindow: (Window) -> Unit) {
         val min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (min <= 0) {
             running.set(false)
@@ -149,7 +153,7 @@ internal object SpeakerScreenTest {
             return
         }
 
-        Log.i(TAG, "started aec=$echoCancelled")
+        Log.i(TAG, "started source=${AecSupport.sourceName(source)} aec=$echoCancelled")
 
         val buffer = ShortArray(FRAME_SAMPLES)
         val window = ShortArray(windowSamples)

@@ -4,6 +4,11 @@
 > **这一轮的核心收获不是修好了什么，而是搞清楚了几件「看起来像 A，
 > 实际是 B」的事**——下面按「已确认 / 已排除 / 未解决」分开写，
 > 免得接手的人重复踩。
+>
+> **2026-11-21 补记（音源统一）**：文中 §2.1、§2.3 两条结论**已经过期**，
+> 修复都在当前 main 里（见各自的「已过期」框），§四 的 P0/P1 也已完成。
+> main 现在不止 `c6708e3d7`，那条只是写作时的回滚点。这一轮新做的
+> 「采集音源统一」写在 §八。
 
 ---
 
@@ -27,6 +32,12 @@
 ## 二、已确认的结论（有数据支撑）
 
 ### 2.1 声纹录入保存的是「同一个 buffer 的残影」——这是主因
+
+> **已过期（2026-11-21 核实）**：`VoiceprintRecorder` 现在存的是拷贝
+> （`synchronized(chunks) { chunks.add(buffer.copyOf(n)) }`，提交 `9d84ad42`），
+> 残影问题不存在了。**下面这段仍然值得读**——它记的是当时怎么用
+> 「唯一采样值 + 峰值」把问题钉死的，那套判据现在还在用。
+> 但「这是主因」这句话对当前代码不成立，别再沿着它找 bug。
 
 `VoiceprintRecorder` 的采集循环里：
 
@@ -82,6 +93,11 @@ KaldiFbank: count=600 voiced=0 need=72
 **这是 2.1 的下游症状**，不是独立问题。
 
 ### 2.3 CMN 确实只减了均值，没除标准差
+
+> **已过期（2026-11-21 核实）**：CMN 已经落地，不用「重做」。
+> `KaldiFbank.compute()` 现在逐维减去本段均值（`fr[k] = (fr[k] - m[k])`），
+> `applyMean()` 也在推理路径上被调用了（提交 `a690e4b4`）。
+> 下面的数据是**修复前**测的，留着当对照；「这个修复要重做」那句作废。
 
 `KaldiFbank.compute()` 里原来是这样：
 
@@ -143,7 +159,12 @@ HAL，②③ 失败但 ④ 仍有效——只看「开没开」会把 14 误判�
 | Xperia 5 IV | **-32.5** | -28.7 | -29.5 |
 
 **Pixel 的通话音源是废的**（-74dB），Xperia 正常。所以 Pixel 上实景测试
-录出一片静默是设备特性，不是代码问题——实景测试页已有音源切换可选。
+录出一片静默是设备特性，不是代码问题。
+
+~~实景测试页已有音源切换可选。~~ **（2026-11-21 起已过期）** 实景测试页不再
+有自己的一套音源开关：它和通话用同一个设置（设置 → 语音 → 通话收音），
+auto 的判断也只做一遍（`speech/MicSource.kt`）。这解决了原来那个更要紧的问题：
+两条路径可能收的不是同一路声音，分数不可比。见 §八。
 
 ---
 
@@ -175,7 +196,10 @@ adb -s <serial> pull /sdcard/Android/data/io.github.ccch1mneyyy.dsh_app/files/vo
 
 ## 四、未解决 / 待办
 
-### P0：修 2.1 的引用 bug，然后重新验证
+### ~~P0：修 2.1 的引用 bug，然后重新验证~~ **已完成**
+
+> 2026-11-21 核实：`VoiceprintRecorder` 里已经是 `chunks.add(buffer.copyOf(n))`
+> （提交 `9d84ad42`），下面这段留作记录。验证标准仍然有用——重录声纹后照它看。
 
 代码在 stash 里，但**不要直接 pop**——里面同时带着 `READ_BLOCKING` 和
 `min*8` 这两个已被证伪的改动。只挑 `buffer.copyOf(kept)` 那一处：
@@ -191,9 +215,10 @@ git stash show -p stash@{0} -- '*VoiceprintRecorder.kt'
 三段自检 worst > 0.6             → 同一个人一致性正常
 ```
 
-### P1：重做 CMVN
+### ~~P1：重做 CMVN~~ **已完成**
 
-见 2.3。注意 `applyMean` 签名同步。
+> 见 2.3 的「已过期」框：`a690e4b4` 已经把「算完均值就返回」改成逐维减均值，
+> `applyMean` 也接回了推理路径。本项不用再做。
 
 ### P2：重建评估集
 
@@ -215,6 +240,11 @@ git stash show -p stash@{0} -- '*VoiceprintRecorder.kt'
 
 「回声消除诊断」→「量一遍」。目前只有 Pixel 的数据，而 Pixel 的通话
 音源本身是废的，参考价值有限。
+
+### P4：真机上核对音源统一（§八）
+
+「回声消除诊断」→「音源」两栏应该给出同一路音源，以及量到的 VC/VR 峰值。
+两栏不一致，说明设置没送到原生或被别的路径覆盖了。
 
 ---
 
@@ -257,20 +287,21 @@ java 子进程在烧 CPU**，别只看进程活着。
 ```
 app/android/app/src/main/kotlin/io/github/ccch1mneyyy/dsh_app/
 ├── nativemedia/
-│   ├── KaldiFbank.kt        ← CMN/CMVN 在这（P1）
+│   ├── KaldiFbank.kt        ← CMN/CMVN 在这
 │   ├── CampplusEmbedder.kt  ← fbank → 模型 → L2
 │   ├── SpeakerGate.kt       ← 判定核心
 │   └── Thresholds.kt        ← 阈值曲线（数据修好后才该动）
 └── speech/
-    ├── VoiceprintRecorder.kt ← P0 的 bug 在这
+    ├── VoiceprintRecorder.kt ← 声纹采集 / probeSources（音源实测在这）
     ├── AecSupport.kt         ← AEC 四层诊断
-    ├── SpeakerScreenTest.kt  ← 实景测试
+    ├── MicSource.kt          ← **音源选择**：通话和实景测试共用（§八）
+    ├── SpeakerScreenTest.kt  ← 实景测试（音源由 MicSource 传入）
     └── Voiceprint.kt         ← 运行时静默参数
 
 app/lib/ui/settings/
 ├── voiceprint_enroll_page.dart  ← 录入页（_finish 自检在这）
-├── screen_test_page.dart        ← 实景测试页（含音源选择）
-└── aec_diagnostics_page.dart    ← AEC 诊断页
+├── screen_test_page.dart        ← 实景测试页（音源跟随「通话收音」，只显示结果）
+└── aec_diagnostics_page.dart    ← AEC 诊断页 + 音源探测结果
 ```
 
 ---
@@ -283,3 +314,51 @@ app/lib/ui/settings/
 下一步的正确顺序是：先修 P0，然后用离线评估把「录音质量」这个变量钉死，
 再去碰任何阈值、任何模型参数。**在数据没修好之前，所有关于阈值和归一化
 的结论都不可信。**
+
+---
+
+## 八、采集音源统一（2026-11-21）
+
+### 原来错在哪
+
+两条路径各挑各的音源：
+
+| 路径 | 音源从哪来 | auto 时怎么定 |
+|---|---|---|
+| 通话 | 设置 →「通话收音」（auto/communication/recognition） | `SpeechPlugin.autoPickRecognition()` 比 VC/VR 峰值，差 > 20 dB 换 VR |
+| 实景测试 | 页面自己的 comm/recog/mic 三段开关 | 没有 auto，默认钉死 `VOICE_COMMUNICATION` |
+
+同一台机器上可能一个收 VC、一个收 VR（Sony 上两路差 53 dB），**分数不可比**，
+"实景测试打断成功但通话打断不了"这类现象也就没法归因。
+
+### 现在
+
+`speech/MicSource.kt` 一处决定，两条路径共用：
+
+- 入口仍是**一个**设置：`callStart` 的 `micSource` 和 `screenTestStart` 的
+  `source` 都把它送进来（默认 `auto`）。
+- 判据没变：`MicSource.SWAP_DB = 20.0`（识别比通话高 20 dB 以上才换），
+  只是从 `SpeechPlugin` 挪进 `MicSource`；**`Thresholds.kt` 没碰**。
+- 每次决定留一条 `Pick`：量到的 VC / VR / MIC 峰值、差值、选了哪一路、为什么。
+  `lastCall` 和 `lastScreenTest` 分开存，诊断页并排看。
+- MethodChannel 只做**增量**：新增 `micSourceReport`、`micSourceProbe`；
+  `screenTestWindow` 多 `source` / `sourceRequested` 两个键。旧的 `source`
+  取值（`comm` / `recog` / `mic` 和缺省）仍然认，旧版 Dart 行为不变。
+
+### 已知代价（本轮没动）
+
+- 通话路径的 auto 探测仍在**主线程同步**做（三条音源各 1.5 秒，约 4.5 秒）。
+  这是改动前就有的，没顺手改时序——要改的话得让 `callStart` 异步回答，
+  牵到挂断竞态，另开一单。
+- `screenTestSaved` 从不清零，跨轮累加到 6 之后就不再存 wav（第二次测试起
+  没有可回听的录音）。与本轮无关，记在这里。
+
+### 真机上要看的两个数
+
+1. **实景测试与通话在同一音源下的峰值差**：诊断页「音源」两栏的 `chosen`
+   必须是同一路；然后各跑一次，两次报的 VC/VR 峰值应当接近（同机同声场下
+   差值远小于 20 dB 的门槛）。差得多，说明 auto 在两条路径上做了不同判断。
+2. **诊断页能看到的探测结果**：「通话最近一次」和「实景测试最近一次」两行
+   各自带"实测峰值：通话 −74.1 / 识别 −20.8 dBFS，差 53.0 dB"和一句结论
+   （"换识别——通话那一路把人声吃掉了"）。手动「量一遍音源」还会额外给出
+   原始麦克风那一路。

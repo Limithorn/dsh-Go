@@ -61,6 +61,49 @@ class _Echo {
   }
 }
 
+/// 一次音源选择，对应原生 `MicSource.Pick`。
+///
+/// 为什么要在这里显示：auto 会**自己换路**，所以"设置里选了自动"回答不了
+/// "这次到底收的哪一路"。两条路径（通话 / 实景测试）必须收同一路声音，分数
+/// 才可比——这一栏就是拿来看这件事成不成立的。
+class _Pick {
+  _Pick({
+    required this.requested,
+    required this.chosen,
+    required this.reason,
+    required this.at,
+    this.vc,
+    this.vr,
+    this.mic,
+    this.delta,
+  });
+
+  final String requested;
+  final String chosen;
+  final String reason;
+  final int at;
+
+  /// 自动判断时量到的峰值（dBFS）；手动指定档位时不量，是 null。
+  final double? vc;
+  final double? vr;
+  final double? mic;
+  final double? delta;
+
+  static _Pick? of(Object? raw) {
+    if (raw is! Map) return null;
+    return _Pick(
+      requested: '${raw['requested'] ?? '—'}',
+      chosen: '${raw['chosen'] ?? '—'}',
+      reason: '${raw['reason'] ?? ''}',
+      at: (raw['at'] as num?)?.toInt() ?? 0,
+      vc: (raw['vc'] as num?)?.toDouble(),
+      vr: (raw['vr'] as num?)?.toDouble(),
+      mic: (raw['mic'] as num?)?.toDouble(),
+      delta: (raw['delta'] as num?)?.toDouble(),
+    );
+  }
+}
+
 class _AecDiagnosticsPageState extends ConsumerState<AecDiagnosticsPage> {
   static const _channel = MethodChannel('dsh/speech');
 
@@ -69,10 +112,78 @@ class _AecDiagnosticsPageState extends ConsumerState<AecDiagnosticsPage> {
   _Echo? _matrix;
   String? _note;
 
+  /// 音源：两条路径各自最近一次的选择 + 手动量的那一次。
+  _Pick? _micCall;
+  _Pick? _micScreen;
+  _Pick? _micProbe;
+  double _swapDb = 20;
+  bool _micBusy = false;
+  bool _micRunning = false;
+  String? _micNote;
+
   @override
   void initState() {
     super.initState();
     unawaited(_loadReport());
+    unawaited(_loadMic());
+  }
+
+  Future<void> _loadMic() async {
+    Map<Object?, Object?>? r;
+    try {
+      r = await _channel.invokeMapMethod<Object?, Object?>('micSourceReport');
+    } on PlatformException {
+      // 旧版原生没有这个方法：这一栏整块不显示，别的照旧。
+      return;
+    }
+    if (!mounted || r == null) return;
+    _applyMic(r);
+  }
+
+  void _applyMic(Map<Object?, Object?> r) {
+    setState(() {
+      _micCall = _Pick.of(r['call']);
+      _micScreen = _Pick.of(r['screen']);
+      _micProbe = _Pick.of(r['probe']);
+      _swapDb = (r['swapDb'] as num?)?.toDouble() ?? _swapDb;
+      _micRunning = r['busy'] == true;
+    });
+  }
+
+  /// 手动量一遍：三条音源各录 1.5 秒，返回量到的峰值和"自动会选哪一路"。
+  Future<void> _probeMic() async {
+    setState(() {
+      _micBusy = true;
+      _micNote = null;
+    });
+    Map<Object?, Object?>? m;
+    try {
+      m = await _channel.invokeMapMethod<Object?, Object?>('micSourceProbe');
+    } on PlatformException {
+      m = null;
+    }
+    if (!mounted) return;
+    if (m == null) {
+      setState(() {
+        _micBusy = false;
+        _micNote = '量不出来（旧版原生不支持这个量测）';
+      });
+      return;
+    }
+    final error = m['error'];
+    if (error != null) {
+      setState(() {
+        _micBusy = false;
+        _micNote = '$error';
+      });
+      return;
+    }
+    final pick = _Pick.of(m);
+    setState(() {
+      _micBusy = false;
+      _micProbe = pick;
+    });
+    unawaited(_loadMic());
   }
 
   Future<void> _loadReport() async {
@@ -223,6 +334,47 @@ class _AecDiagnosticsPageState extends ConsumerState<AecDiagnosticsPage> {
             ],
           ),
         SettingsSection(
+          title: '音源（通话和实景测试同一个设置）',
+          children: [
+            SettingsTile(
+              key: const ValueKey('mic-source-setting'),
+              title: '设置：${call.callMicSource.label}',
+              subtitle: '自动时按实测电平换路：识别比通话高 ${_swapDb.toStringAsFixed(0)} dB 以上才换。'
+                  '实景测试不再有自己的音源开关，两边收的是同一路。',
+            ),
+            _pickRow('通话最近一次', _micCall),
+            _pickRow('实景测试最近一次', _micScreen),
+            if (_micCall case final a?)
+              if (_micScreen case final b?)
+                SettingsTile(
+                  title: a.chosen == b.chosen
+                      ? '两边收的是同一路：${a.chosen}'
+                      : '两边不是同一路：通话 ${a.chosen}，实景测试 ${b.chosen}',
+                  subtitle: a.chosen == b.chosen
+                      ? '同一路声音，实景测试的分数才能和通话互相印证'
+                      : '改完设置后各跑一次，让两边用同一套判断重新选一遍',
+                  trailing: Icon(
+                    a.chosen == b.chosen ? Icons.check_circle_outline : Icons.error_outline,
+                    size: 20,
+                    color: a.chosen == b.chosen ? scheme.primary : scheme.error,
+                  ),
+                ),
+            SettingsTile(
+              key: const ValueKey('mic-source-probe'),
+              title: _micBusy ? '正在量…' : '量一遍音源（约 5 秒）',
+              subtitle: '三条音源各录 1.5 秒，报峰值和"自动会选哪一路"。保持安静，别说话',
+              onTap: _micBusy || _micRunning ? null : _probeMic,
+            ),
+            if (_micRunning)
+              const SettingsTile(
+                title: '麦克风正被通话或实景测试占用',
+                subtitle: '先停掉，再回来量',
+              ),
+            if (_micNote case final n?) SettingsTile(title: n, danger: true),
+            if (_micProbe case final p?) _pickRow('手量结果', p),
+          ],
+        ),
+        SettingsSection(
           title: '实测',
           children: [
             SettingsTile(
@@ -286,6 +438,36 @@ class _AecDiagnosticsPageState extends ConsumerState<AecDiagnosticsPage> {
         ),
       ],
     );
+  }
+
+  /// 一行音源选择：选了哪一路、依据、量到的峰值、什么时候。
+  Widget _pickRow(String label, _Pick? p) {
+    if (p == null) return SettingsTile(title: label, subtitle: '还没有记录', trailing: const Text('—'));
+    final scheme = Theme.of(context).colorScheme;
+    final lines = <String>[
+      if (p.reason.isNotEmpty) p.reason,
+      if (p.vc != null && p.vr != null)
+        '实测峰值：通话 ${_db(p.vc!)} / 识别 ${_db(p.vr!)}'
+            '${p.mic == null ? '' : ' / 原始麦 ${_db(p.mic!)}'} dBFS'
+            '${p.delta == null ? '' : '，差 ${p.delta!.toStringAsFixed(1)} dB'}',
+      if (p.at > 0) '量于 ${_clock(p.at)}',
+    ];
+    final swapped = p.requested == 'auto' && p.chosen == 'VOICE_RECOGNITION';
+    return SettingsTile(
+      title: '$label：${p.chosen}',
+      subtitle: lines.isEmpty ? null : lines.join('\n'),
+      trailing: Icon(
+        swapped ? Icons.swap_horiz : Icons.chevron_right,
+        size: 20,
+        color: swapped ? scheme.primary : scheme.outline,
+      ),
+    );
+  }
+
+  static String _clock(int ms) {
+    final t = DateTime.fromMillisecondsSinceEpoch(ms);
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
   }
 
   Widget _layer(String name, bool ok, String detail) => SettingsTile(

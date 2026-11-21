@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../companion/companion_voice.dart';
+import '../../speech/speech_audio.dart';
 import '../../speech/speech_settings.dart';
 import '../../speech/voiceprint_store.dart';
 import '../../state/app_info.dart';
@@ -21,6 +22,11 @@ import 'settings_widgets.dart';
 /// 为什么必须有这一页：自打断（AI 自己的声音漏回麦克风被认成自己）和
 /// 插话困难（真说话时分数不够）都只在真的放声音时出现。离线跑 embed 时
 /// 麦克风是安静的，这两件事一件都复现不了。
+///
+/// **收音不再由这一页自己定**：原来这里有独立的 comm/recog/mic 三档，通话走
+/// 设置里的「通话收音」，两条路径可能收的不是同一路声音，分数没法互相印证。
+/// 现在音源只认一个设置，auto 的判断也由原生统一做（Kotlin 侧的 MicSource），
+/// 本页只把"这次实际用的哪一路、量到了什么"显示出来。
 class ScreenTestPage extends ConsumerStatefulWidget {
   const ScreenTestPage({super.key});
 
@@ -36,6 +42,22 @@ class _Window {
   final String kind;
   final double rms;
   final bool barged;
+}
+
+/// 原生这次为实景测试选音源的依据，对应 `micSourceReport` 里的 `screen`。
+class _Pick {
+  _Pick({required this.chosen, required this.requested, this.vc, this.vr, this.delta, this.reason});
+
+  final String chosen;
+  final String requested;
+
+  /// 自动判断时量到的峰值（dBFS）；手动指定档位时不量，是 null。
+  final double? vc;
+  final double? vr;
+
+  /// 识别减通话，dB。
+  final double? delta;
+  final String? reason;
 }
 
 class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
@@ -55,13 +77,11 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
   /// 正在放第几段；-1 表示没在放。
   int _playing = -1;
 
-  /// 测试用哪个音源。
+  /// 本轮实际用的音源，和原生给的选择依据。
   ///
-  /// 默认 comm —— 通话真实用的那一路，测它才有意义。
-  /// 但有的机器这一路电平极低（Pixel 4 实测 −74dBFS），录出来几乎全是
-  /// 静默，回听会以为"根本没录到"。切成 recognition 就能听到真实输入，
-  /// 用来区分"没人说话"和"这一路把声音吃了"。
-  String _source = 'comm';
+  /// 音源不再由这一页的开关决定（那个开关已经删掉，改成跟随通话设置）：所以
+  /// 页面至少要说清楚"这次到底收的哪一路"，否则分数和通话一对比就没法解释。
+  _Pick? _pick;
 
   /// 让 TTS 一直说下去：说完一句接下一句，直到停。
   ///
@@ -105,12 +125,16 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
       setState(() => _note = '还没有录入声音，先录一份再来测');
       return;
     }
+    // 存着的设置读完了再取音源，否则可能在默认值上跑一遍。
+    final source = (await ref.read(callSettingsProvider.notifier).ready()).callMicSource;
+    if (!mounted) return;
     setState(() {
       _windows.clear();
       _clips = const [];
       _note = null;
       _running = true;
       _turn = 0;
+      _pick = null;
     });
 
     _channel.setMethodCallHandler((call) async {
@@ -131,7 +155,7 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
 
     final ok = await _channel.invokeMethod<bool>(
           'screenTestStart',
-          {'source': _source == 'recog' ? 'recognition' : _source},
+          {'source': source.wire},
         ) ??
         false;
     if (!ok) {
@@ -139,8 +163,32 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
       if (mounted) setState(() => _note = '开不了采集（权限或被占用）');
       return;
     }
+    // 音源在起采集之前就已经定好了，这里只是把它和依据取回来显示。
+    await _loadPick();
     await _voice.ready();
     _nextSentence();
+  }
+
+  /// 取原生这次选音源的结果（`micSourceReport` 的 `screen` 那份）。
+  ///
+  /// 新增的方法：旧版原生没有它，取不到就当没有——不影响采集和判定。
+  Future<void> _loadPick() async {
+    try {
+      final r = await _channel.invokeMapMethod<Object?, Object?>('micSourceReport');
+      final p = r?['screen'];
+      if (!mounted || p is! Map) return;
+      final pick = _Pick(
+        chosen: '${p['chosen'] ?? '—'}',
+        requested: '${p['requested'] ?? '—'}',
+        vc: (p['vc'] as num?)?.toDouble(),
+        vr: (p['vr'] as num?)?.toDouble(),
+        delta: (p['delta'] as num?)?.toDouble(),
+        reason: p['reason'] as String?,
+      );
+      setState(() => _pick = pick);
+    } on PlatformException {
+      // 旧原生：没有这个方法，页面照旧只显示分数。
+    }
   }
 
   /// 说下一句。用定时兜底：某些 TTS 引擎不发 end 事件（尤其是不支持
@@ -204,27 +252,40 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
                   '收音 ${call.voiceprintMic.wire} · '
                   '外人插话${call.voiceprintOthers ? '开' : '关'}',
             ),
-            SettingsSegmentTile<String>(
+            SettingsSegmentTile<CallMicSource>(
               key: const ValueKey('screen-source'),
-              title: '测试音源',
-              subtitle: _source == 'comm'
-                  ? '通话那一路：和真实通话一致，但有的机器电平极低，录音几乎是静默'
-                  : _source == 'recog'
-                  ? '识别那一路：不降噪，能听到真实输入，但和通话时不是同一路'
-                  : '原始麦克风：最接近硬件，不带任何系统处理',
+              title: '收音（和通话同一个设置）',
+              subtitle: switch (call.callMicSource) {
+                CallMicSource.auto =>
+                  '自动：启动时量两路电平，通话那一路低 20dB 以上就换识别——和通话用的是同一次判断',
+                CallMicSource.communication =>
+                  '通话那一路：带 AEC，自己播的声音不会漏回来；但有的机器会把人声也压掉',
+                CallMicSource.recognition =>
+                  '识别那一路：不降噪、电平高，但自己播的声音会漏回来',
+              },
               segments: const [
-                PillSegment('comm', '通话'),
-                PillSegment('recog', '识别'),
-                PillSegment('mic', '原始'),
+                PillSegment(CallMicSource.auto, '自动'),
+                PillSegment(CallMicSource.communication, '通话'),
+                PillSegment(CallMicSource.recognition, '识别'),
               ],
-              selected: _source,
+              selected: call.callMicSource,
               onChanged: _running
                   ? null
-                  : (v) => setState(() {
-                        _source = v;
-                        _clips = const [];
-                      }),
+                  : (v) => unawaited(
+                        ref.read(callSettingsProvider.notifier).edit((saved) => saved.copyWith(callMicSource: v)),
+                      ),
             ),
+            if (_pick case final p?)
+              SettingsTile(
+                key: const ValueKey('screen-chosen-source'),
+                title: '这一轮收的是 ${p.chosen}',
+                subtitle: [
+                  p.requested == 'auto' ? (p.reason ?? '自动判断') : '设置里直接指定的档位',
+                  if (p.vc != null && p.vr != null)
+                    '实测峰值：通话 ${_db(p.vc!)} / 识别 ${_db(p.vr!)} dBFS'
+                        '${p.delta == null ? '' : '，差 ${p.delta!.toStringAsFixed(1)} dB'}',
+                ].join('\n'),
+              ),
           ],
         ),
         SettingsSection(
@@ -302,13 +363,21 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
               title: '怎么用',
               subtitle: '在「通话 → 免提」和「听筒」两种模式下各测一次，比较平均分和打断次数：\n'
                   '· 免提时平均分明显更高 → 我自己的声音漏进来了，是自打断\n'
-                  '· 两种模式都打断不了、分数低 → 是声纹本身认不出，调灵敏度或收音档位',
+                  '· 两种模式都打断不了、分数低 → 是声纹本身认不出，调灵敏度或收音档位\n'
+                  '两边的收音是同一个设置：这里测的分数可以直接和通话比。',
             ),
           ],
         ),
       ],
     );
   }
+
+  /// 电平显示：−999 / −998 是原生"打不开/没采到"的占位值，别当 dB 读。
+  static String _db(double v) => switch (v) {
+    <= -997 => '没采到',
+    <= -900 => '打不开',
+    _ => v.toStringAsFixed(1),
+  };
 
   static String _label(String kind) => switch (kind) {
     'YOU' => '你',
