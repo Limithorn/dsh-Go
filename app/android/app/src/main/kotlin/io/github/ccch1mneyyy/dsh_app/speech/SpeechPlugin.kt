@@ -408,6 +408,32 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                         main.post { done.success(false) }
                         return@Thread
                     }
+                    // 测试也要进通信模式，和通话一样。
+                    //
+                    // 不进的话有两个后果，都是实测踩到的：
+                    // 1. TTS 走默认流（可能是通知/铃声），不进媒体流——音量键调不到，
+                    //    声音也可能被系统调得很小甚至不响。
+                    // 2. AEC 拿不到参考：通话能把播放轨 remap 到通信链路，AEC 从
+                    //    下行抽样消除自己的声音；测试不 remap，AEC 标志是 true 却
+                    //    没东西可减，回声直接漏回麦克风被当成插话。
+                    val enterComm = {
+                        val am = audio
+                        if (am != null && previousMode == null) {
+                            previousMode = am.mode
+                            runCatching { am.mode = AudioManager.MODE_IN_COMMUNICATION }
+                            communicationActive = true
+                        }
+                        // 外放：测试就是要让自己的声音被麦克风听到。
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            runCatching {
+                                am?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                                    ?.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                                    ?.let { am.setCommunicationDevice(it) }
+                            }
+                        }
+                        speaker = true
+                    }
+                    main.post { runCatching { enterComm() } }
                     val ok = runCatching {
                         SpeakerScreenTest.start(pick.source) { w ->
                             // 回调在采集线程上，转回主线程再往 Dart 送。
@@ -447,6 +473,16 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                 screenTestGeneration++
                 SpeakerScreenTest.stop()
                 startedScreenTest = false
+                // 还原音频模式：测试借用了通信模式，结束要还回去，否则后面
+                // 放音乐、放视频都会走通话音量。
+                previousMode?.let { m ->
+                    runCatching { audio?.mode = m }
+                    previousMode = null
+                }
+                communicationActive = false
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    runCatching { audio?.clearCommunicationDevice() }
+                }
                 result.success(screenTestDir.listFiles()?.sortedByDescending { it.lastModified() }
                     ?.take(SCREEN_TEST_KEEP)?.map { it.absolutePath } ?: emptyList<String>())
             }
