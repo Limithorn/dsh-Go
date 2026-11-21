@@ -5,11 +5,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../companion/companion_voice.dart';
+import '../../speech/call/scripted_conversation.dart';
 import '../../speech/speech_audio.dart';
 import '../../speech/speech_settings.dart';
 import '../../speech/voiceprint_store.dart';
 import '../../state/app_info.dart';
 import '../shell/page_frame.dart';
+import '../speech/voice_call_page.dart';
 import 'settings_widgets.dart';
 
 /// 实景测试：TTS 正在说话的时候，看人说话能不能打断。
@@ -117,6 +119,37 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
     unawaited(_sub?.cancel());
     if (_running) unawaited(_stop());
     super.dispose();
+  }
+
+  /// 拉起通话页，用真实链路测一遍。
+  ///
+  /// 和本页那个「开始」的区别：那个只开一路采集打分，**通话页怎么开采集、
+  /// 怎么挂 AEC、怎么判定插话它都走不到**。用户要验的恰恰是通话页这条链路。
+  ///
+  /// 不接大模型：会话换成 [ScriptedCallConversation]，只念固定台词，
+  /// 不花 token、不受网络影响、每次跑的结果可比。
+  Future<void> _openCallTest() async {
+    final profiles = ref.read(voiceprintProfilesProvider).value ?? const <VoiceProfile>[];
+    if (profiles.isEmpty) {
+      setState(() => _note = '还没有录入声音，先录一份再来测');
+      return;
+    }
+    // 先停掉本页自己的采集：它和通话页抢麦克风。
+    if (_running) await _stop();
+    if (!mounted) return;
+
+    final conversation = ScriptedCallConversation(
+      lines: const [
+        '今天天气不错，我们出去走走吧。',
+        '我刚才在想一件事，你听着——如果一句话说到一半被打断，会是什么感觉呢。',
+        '好的，那我继续说了。',
+      ],
+    );
+    await pushScriptedTestCall(
+      context,
+      title: '通话页测试',
+      conversation: conversation,
+    );
   }
 
   Future<void> _start() async {
@@ -297,6 +330,13 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
                   ? '我正在说话——现在插话试试'
                   : '会播放我的声音，你随时插话；同时录下麦克风听到的东西',
               onTap: _running ? _stop : _start,
+            ),
+            SettingsTile(
+              key: const ValueKey('screen-open-call'),
+              title: '在通话页里测',
+              subtitle: '拉起真正的通话页面，念固定台词（不接大模型）。'
+                  '采集、AEC、声纹判定、打断都走通话那条链路',
+              onTap: _openCallTest,
             ),
             if (_note case final n?) SettingsTile(title: n, danger: true),
             if (_running)

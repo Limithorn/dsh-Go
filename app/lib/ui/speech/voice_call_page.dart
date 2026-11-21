@@ -87,6 +87,38 @@ Future<void> openChatCall(
 /// [call] is the controller the page shows — the host (state/voice_call_host.dart)
 /// makes it before pushing, so 收起 can pop this route and push it back with
 /// the same call; [onCollapse] tells the host the page is going away for 收起.
+/// 用假会话拉起通话页，做「不接大模型」的链路测试。
+///
+/// 页面自己造 controller（`controller` 传 null），于是采集、AEC、声纹判定、
+/// 打断、TTS 全走通话页原本那条路，只有回复来源换成了固定台词。
+///
+/// 和 [pushVoiceCallPage] 分开是因为那个要求调用方先把 controller 造好，
+/// 而测试不需要那个 controller——它存在的意义是让「收起」能留住通话，
+/// 测试里没有这个诉求。
+Future<void> pushScriptedTestCall(
+  BuildContext context, {
+  required String title,
+  required CallConversation conversation,
+}) {
+  return Navigator.of(context).push(
+    PageRouteBuilder<void>(
+      barrierDismissible: false,
+      opaque: false,
+      fullscreenDialog: true,
+      transitionDuration: AppMotion.of(context, const Duration(milliseconds: 520)),
+      reverseTransitionDuration: AppMotion.of(context, AppMotion.collapse),
+      pageBuilder: (_, _, _) => VoiceCallPage(title: title, conversation: conversation),
+      transitionsBuilder: (_, animation, _, child) {
+        final curve = CurvedAnimation(parent: animation, curve: AppMotion.enter, reverseCurve: AppMotion.exit);
+        return FadeTransition(
+          opacity: curve,
+          child: ScaleTransition(scale: Tween(begin: 1.06, end: 1.0).animate(curve), child: child),
+        );
+      },
+    ),
+  );
+}
+
 Future<void> pushVoiceCallPage(
   BuildContext context, {
   required VoiceCallController call,
