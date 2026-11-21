@@ -79,11 +79,44 @@ ARGS+=(--dart-define=DSH_BUILD_NAME="${NAME}")
 ARGS+=(--dart-define=DSH_BUILD_COMMIT="${BUILD}")
 ARGS+=(--dart-define=DSH_BUILD_TIME="${STAMP}")
 
+LOG="build-apk.log"
+
 echo "→ ${NAME}"
+
+# ── 先单独跑一遍 AOT ──────────────────────────────────────────────
+#
+# 为什么：`flutter build apk` 里，Dart 的 AOT（android_aot_bundle_release_*）
+# 和 Gradle 的其它任务并行跑时会**卡死**——进程还在，CPU 不涨，没有任何
+# 输出，10 分钟、20 分钟都不动，只能手动杀掉。
+#
+# 证据：同一个任务单独跑（下面这段）156 秒就完成，一次没卡过。所以不是
+# AOT 本身的问题，是并行时的资源竞争。
+#
+# 先在这里把它做掉，flutter build 时这一任务就 up-to-date、直接跳过，
+# 并行那一步也就不存在了。
+#
+# 注意不要用 `rm -rf build` 来"解决"卡死：清空之后 AOT 必须从头做，
+# 反而更容易踩到并行阶段。留着上次的中间产物，只重跑这一任务最快。
+if [ "$MODE" = "release" ]; then
+  DART="${FLUTTER%/flutter.bat}"
+  DART_SDK="$DART/cache/dart-sdk/bin/dart.exe"
+  TOOLS="$DART/cache/flutter_tools.snapshot"
+  PKGS="$DART/packages/flutter_tools/.dart_tool/package_config.json"
+  if [ -x "$DART_SDK" ]; then
+    echo "  AOT 预跑（避免并行卡死）..."
+    "$DART_SDK" --packages="$PKGS" "$TOOLS" assemble --no-version-check \
+      -dTargetFile=lib/main.dart -dTargetPlatform=android -dBuildMode=release \
+      -dFlavor=arm64 -dAndroidArchs=android-arm64 -dMinSdkVersion=26 \
+      --output build/app/intermediates/flutter/arm64Release \
+      android_aot_bundle_release_android-arm64 >> "$LOG" 2>&1
+    AOT_STATUS=$?
+    # 这一步失败不算致命：flutter build 自己会再做一次，只是可能卡。
+    [ $AOT_STATUS -ne 0 ] && echo "  ⚠ AOT 预跑失败（$AOT_STATUS），交给 flutter build 重试"
+  fi
+fi
 
 # 日志落到文件里：管道收给 grep 的话，卡在哪一步完全看不见。
 # 这台机器上完整编译要 20 分钟到一个小时，看 tail -f 比盯着空屏强。
-LOG="build-apk.log"
 "$FLUTTER" "${ARGS[@]}" > "$LOG" 2>&1
 STATUS=$?
 if [ $STATUS -ne 0 ]; then
