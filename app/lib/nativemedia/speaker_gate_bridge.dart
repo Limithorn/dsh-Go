@@ -144,6 +144,21 @@ class VoiceprintChannel {
     }
   }
 
+  /// 直接设判定门槛的绝对值；[accept] 为 null 表示恢复按档位算。
+  ///
+  /// 滑条用。和 [setLevel] 的区别：档位是离散的四档、`bias` 只能 ±0.20
+  /// 地微调；滑条要拖到任意位置，所以给绝对值。两者互斥——设了绝对值
+  /// 就覆盖档位。
+  Future<void> setAccept(double? accept) async {
+    try {
+      await _channel.invokeMethod<void>('voiceprintAccept', {'accept': accept});
+    } on PlatformException {
+      // 忽略。
+    } on MissingPluginException {
+      // 忽略。
+    }
+  }
+
   /// 录 [ms] 毫秒，算出「让正常说话达到目标响度」的固定倍数。
   ///
   /// 返回 null 表示这段录音不可用（太短、几乎没说话）——那种情况算出来的

@@ -148,7 +148,15 @@ class CallSettings {
     this.voiceprintOthers = true,
     this.voiceprintLevel = VoiceprintLevel.normal,
     this.voiceprintBias = 0,
-    this.callMicSource = CallMicSource.auto,
+    // 默认改成固定通话音源。
+    //
+    // 原默认是 auto：启动时开三条音源各量 1.5 秒再挑，整个过程同步发生在
+    // 主线程上，接通电话要白等约 4.5 秒。这个代价每次通话都要付，而绝大多数
+    // 机器上 communication 本来就是对的。
+    //
+    // auto 没删，留在设置里供个别机器手动切。已存的老配置不动——迁移会
+    // 让本来被 auto 选对的机器反而变差。
+    this.callMicSource = CallMicSource.communication,
     this.voiceprintMic = VoiceprintMic.normal,
     this.voiceprintWake = false,
     this.micGain = 1.0,

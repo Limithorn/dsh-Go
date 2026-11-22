@@ -124,6 +124,8 @@ class SettingsTile extends StatelessWidget {
     this.chevron,
     this.tinted = true,
     this.titleMaxLines,
+    this.enabled = true,
+    this.badge,
   }) : assert(title != null || spot != null);
 
   /// Null for a plain row that lines up with [InfoRow]s.
@@ -156,16 +158,30 @@ class SettingsTile extends StatelessWidget {
   /// Lines the title may take, cut with an ellipsis; null: as many as it needs.
   final int? titleMaxLines;
 
+  /// False greys the row out and makes it inert.
+  ///
+  /// 用于「总闸关掉后下游整组失效」这种联动：置灰不只是画灰，还要
+  /// **不可点、不被无障碍焦点读到为可操作**，否则用户点下去没反应更困惑。
+  /// 默认 true，所有老页面行为不变。
+  final bool enabled;
+
+  /// Small label after the title, e.g. `VAD`.
+  ///
+  /// 只在个别行用（静默检测），做成参数比在页面里拼字符串干净。
+  final String? badge;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final colors = DshColors.of(context);
-    final showChevron = chevron ?? (onTap != null && trailing == null);
+    // 置灰就把 onTap 掐掉：光调颜色的话 InkWell 仍会响应，看着能点却没用。
+    final onTap = enabled ? this.onTap : null;
+    final showChevron = enabled && (chevron ?? (onTap != null && trailing == null));
     final endsInGlyph = showChevron || trailing != null;
     final icon = this.icon;
     final title = this.title ?? spot!.title(context.l10n);
-    return anchorSpot(
+    final row = anchorSpot(
       spot,
       InkWell(
         onTap: onTap,
@@ -193,11 +209,22 @@ class SettingsTile extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        title,
-                        maxLines: titleMaxLines,
-                        overflow: titleMaxLines == null ? null : TextOverflow.ellipsis,
-                        style: settingsTitleStyle(context)?.copyWith(color: danger ? colors.danger : scheme.onSurface),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              title,
+                              maxLines: titleMaxLines,
+                              overflow: titleMaxLines == null ? null : TextOverflow.ellipsis,
+                              style: settingsTitleStyle(context)
+                                  ?.copyWith(color: danger ? colors.danger : scheme.onSurface),
+                            ),
+                          ),
+                          if (badge case final b?) ...[
+                            const SizedBox(width: 6),
+                            _TitleBadge(b),
+                          ],
+                        ],
                       ),
                       if (subtitle case final sub?) ...[
                         const SizedBox(height: 1),
@@ -227,6 +254,40 @@ class SettingsTile extends StatelessWidget {
         ),
       ),
     );
+    // 置灰：整行压暗。包在 anchorSpot 外面而不是里面，是为了让锚点仍然
+    // 可定位（设置搜索的落点），只是视觉上淡掉。
+    return enabled ? row : ExcludeSemantics(child: Opacity(opacity: 0.45, child: row));
+  }
+}
+
+/// 标题后面的小标签，如「VAD」。
+///
+/// 用 tertiary 而不是主色：设计稿要求「一屏一个重心」，VAD 角标只是提示
+/// 这一行是算法参数，不该抢视觉重心。
+class _TitleBadge extends StatelessWidget {
+  const _TitleBadge(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = DshColors.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: colors.textTertiary,
+          letterSpacing: 0.3,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
   }
 }
 
@@ -242,6 +303,7 @@ class SettingsSwitchTile extends StatelessWidget {
     required this.onChanged,
     this.tint = 0,
     this.tinted = true,
+    this.enabled = true,
   }) : assert(title != null || spot != null);
 
   final IconData? icon;
@@ -255,6 +317,9 @@ class SettingsSwitchTile extends StatelessWidget {
   final int tint;
   final bool tinted;
 
+  /// False greys the row out and turns the switch inert (see [SettingsTile.enabled]).
+  final bool enabled;
+
   @override
   Widget build(BuildContext context) {
     final fluid = AppMotion.fluid(context);
@@ -263,6 +328,7 @@ class SettingsSwitchTile extends StatelessWidget {
       onChanged!(next);
     }
 
+    final handler = enabled ? onChanged : null;
     return MergeSemantics(
       child: SettingsTile(
         icon: icon,
@@ -271,8 +337,9 @@ class SettingsSwitchTile extends StatelessWidget {
         subtitle: subtitle,
         tint: tint,
         tinted: tinted,
-        onTap: onChanged == null ? null : () => change(!value),
-        trailing: Switch.adaptive(value: value, onChanged: onChanged == null ? null : change),
+        enabled: enabled,
+        onTap: handler == null ? null : () => change(!value),
+        trailing: Switch.adaptive(value: value, onChanged: handler == null ? null : change),
       ),
     );
   }
@@ -496,6 +563,8 @@ class SettingsSegmentTile<T> extends StatelessWidget {
     required this.onChanged,
     this.onReselect,
     this.tinted = true,
+    this.enabled = true,
+    this.badge,
   }) : assert(title != null || spot != null);
 
   final IconData? icon;
@@ -518,13 +587,19 @@ class SettingsSegmentTile<T> extends StatelessWidget {
   final ValueChanged<T>? onReselect;
   final bool tinted;
 
+  /// False greys the row out and makes the pills inert.
+  final bool enabled;
+
+  /// Small label after the title (see [SettingsTile.badge]).
+  final String? badge;
+
   @override
   Widget build(BuildContext context) {
     final titleStyle = settingsTitleStyle(context);
     final icon = this.icon;
     final title = this.title ?? spot!.title(context.l10n);
     const iconWidth = SettingsMetrics.icon + SettingsMetrics.iconGap;
-    return anchorSpot(
+    final row = anchorSpot(
       spot,
       Padding(
         padding: const EdgeInsets.fromLTRB(SettingsMetrics.inset, 8, SettingsMetrics.inset, 8),
@@ -550,7 +625,7 @@ class SettingsSegmentTile<T> extends StatelessWidget {
             final pill = SegmentedPill<T>(
               segments: segments,
               selected: selected,
-              onChanged: onChanged,
+              onChanged: enabled ? onChanged : null,
               onReselect: onReselect,
               expand: !inline,
             );
@@ -577,7 +652,8 @@ class SettingsSegmentTile<T> extends StatelessWidget {
                 child: Row(
                   children: [
                     ...heading,
-                    Text(title, style: titleStyle),
+                    Flexible(child: Text(title, style: titleStyle, overflow: TextOverflow.ellipsis)),
+                    if (badge case final b?) ...[const SizedBox(width: 6), _TitleBadge(b)],
                     const Spacer(),
                     pill,
                   ],
@@ -595,6 +671,7 @@ class SettingsSegmentTile<T> extends StatelessWidget {
                     children: [
                       ...heading,
                       Expanded(child: Text(title, style: titleStyle)),
+                      if (badge case final b?) ...[const SizedBox(width: 6), _TitleBadge(b)],
                     ],
                   ),
                 ),
@@ -611,5 +688,6 @@ class SettingsSegmentTile<T> extends StatelessWidget {
         ),
       ),
     );
+    return enabled ? row : ExcludeSemantics(child: Opacity(opacity: 0.45, child: row));
   }
 }

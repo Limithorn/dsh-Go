@@ -23,12 +23,12 @@ import '../common/app_dialog.dart';
 import '../companion/companion_voice_page.dart';
 import '../providers/provider_widgets.dart';
 import '../speech/call/call_backdrop.dart';
-import '../../speech/voiceprint_store.dart';
 import '../shell/page_frame.dart';
-import 'voiceprint_list_page.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
+import 'call_boost_section.dart';
 import 'settings_widgets.dart';
+import 'voiceprint_section.dart';
 
 String voiceModeLabel(L10n l10n, VoiceMode mode) => switch (mode) {
   VoiceMode.auto => l10n.voiceModeAuto,
@@ -110,9 +110,32 @@ class VoiceSettingsTile extends ConsumerWidget {
     icon: AppIcons.voice,
     tint: tint,
     spot: SettingsIndex.entry(SettingsPageId.voice),
-    value: Text(voiceModeLabel(context.l10n, ref.watch(voiceSettingsProvider))),
+    // 显示语音状态而不是朗读模式：用户点进这一页多为调声纹和采集，
+    // 「通话 · 标准」比「自动」更能说明现在是什么配置。
+    value: Text(_voiceStateLabel(ref)),
     onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const VoiceSettingsPage())),
   );
+}
+
+/// 设置首页那一行右侧的状态：「通话 · 标准」。
+///
+/// 音源取短名（通话/识别/自动），灵敏度取档位名。声纹关着时后面加个
+/// 「声纹关」，一眼能看出现在是纯能量闸在起作用。
+String _voiceStateLabel(WidgetRef ref) {
+  final call = ref.watch(callSettingsProvider);
+  final source = switch (call.callMicSource) {
+    CallMicSource.communication => '通话',
+    CallMicSource.recognition => '识别',
+    CallMicSource.auto => '自动',
+  };
+  final sens = switch (call.sensitivity) {
+    CallBargeSensitivity.sensitive => '灵敏',
+    CallBargeSensitivity.normal => '标准',
+    CallBargeSensitivity.guarded => '谨慎',
+    CallBargeSensitivity.resistant => '抗误触',
+    CallBargeSensitivity.stubborn => '最抗',
+  };
+  return call.voiceprint ? '$source · $sens' : '$source · $sens · 声纹关';
 }
 
 class VoiceSettingsPage extends ConsumerStatefulWidget {
@@ -399,7 +422,10 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
             ),
           ],
         ),
-        _VoiceprintSection(call: call, calls: calls),
+        // 通话增强在前：它是公共底层，声纹关掉也照常生效。
+        const CallBoostSection(),
+        // 声纹在后：开关是它下面所有项的闸。
+        const VoiceprintSection(),
       ],
     );
   }
@@ -409,128 +435,6 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
 ///
 /// 四行都放在一张卡里，是因为它们讲的是同一件事；总开关一关，下面三行一起
 /// 置灰而不是隐藏——藏起来用户就不知道这功能存在了。
-class _VoiceprintSection extends ConsumerWidget {
-  const _VoiceprintSection({required this.call, required this.calls});
-
-  final CallSettings call;
-  final CallSettingsController calls;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final l10n = context.l10n;
-    final profiles = ref.watch(voiceprintProfilesProvider).value ?? const <VoiceProfile>[];
-    final on = call.voiceprint;
-    final support = ref.watch(voiceprintSupportProvider);
-    // 空名单时开启开关没有意义：判定需要比对对象。界面上仍允许打开，
-    // 但入口行会跳成「还没录过」引导去录第一个。
-    final empty = profiles.isEmpty;
-    // 本机不支持时开关置灰并说明原因，不让人白开一场。
-    final unsupported = support.hasValue && support.value == false;
-
-    return SettingsSection(
-      title: l10n.speechVoiceprintSection,
-      footer: Text(l10n.speechVoiceprintFooter),
-      children: [
-        SettingsSwitchTile(
-          key: const ValueKey('speech-voiceprint'),
-          title: l10n.speechVoiceprintSwitch,
-          subtitle: unsupported ? l10n.speechVoiceprintUnsupported : l10n.speechVoiceprintSwitchHint,
-          value: on && !unsupported,
-          onChanged: unsupported
-              ? null
-              : (next) => unawaited(calls.edit((saved) => saved.copyWith(voiceprint: next))),
-        ),
-        SettingsTile(
-          key: const ValueKey('speech-voiceprint-profiles'),
-          title: l10n.speechVoiceprintProfiles,
-          subtitle: on ? null : l10n.speechVoiceprintOffHint,
-          value: Text(
-            empty ? l10n.speechVoiceprintEmpty : l10n.speechVoiceprintCount(profiles.length),
-            style: empty && on
-                ? TextStyle(color: Theme.of(context).colorScheme.primary)
-                : null,
-          ),
-          // 关着时不可点：流程线性一点——先开开关，再录声音。
-          onTap: on
-              ? () => unawaited(Navigator.of(context).push(
-                    MaterialPageRoute<void>(builder: (_) => const VoiceprintListPage()),
-                  ))
-              : null,
-        ),
-        SettingsSwitchTile(
-          key: const ValueKey('speech-voiceprint-others'),
-          title: l10n.speechVoiceprintOthers,
-          subtitle: l10n.speechVoiceprintOthersHint2,
-          value: call.voiceprintOthers,
-          onChanged: on
-              ? (next) => unawaited(calls.edit((saved) => saved.copyWith(voiceprintOthers: next)))
-              : null,
-        ),
-        // 唤醒是常开的被动监听，判定次数远多于通话，所以单独一个开关，默认关。
-        SettingsSwitchTile(
-          key: const ValueKey('speech-voiceprint-wake'),
-          title: l10n.speechVoiceprintWake,
-          subtitle: l10n.speechVoiceprintWakeHint,
-          value: call.voiceprintWake,
-          onChanged: on
-              ? (next) => unawaited(calls.edit((saved) => saved.copyWith(voiceprintWake: next)))
-              : null,
-        ),
-        SettingsSegmentTile<VoiceprintLevel>(
-          key: const ValueKey('speech-voiceprint-level'),
-          title: l10n.speechVoiceprintLevel,
-          subtitle: l10n.speechVoiceprintLevelHint,
-          segments: [
-            PillSegment(VoiceprintLevel.loose, l10n.speechVoiceprintLoose),
-            PillSegment(VoiceprintLevel.normal, l10n.speechVoiceprintNormal),
-            PillSegment(VoiceprintLevel.strict, l10n.speechVoiceprintStrict),
-            PillSegment(VoiceprintLevel.veryStrict, l10n.speechVoiceprintVeryStrict),
-          ],
-          selected: call.voiceprintLevel,
-          onChanged: on
-              ? (level) => unawaited(calls.edit((saved) => saved.copyWith(voiceprintLevel: level)))
-              : null,
-        ),
-        // 在「认得松严」之后：那个管"分数要多高才算我"，这个管"有没有人说话"。
-        // 两件事，前者再松也没用——采集电平不够，原生根本算不出向量。
-        SettingsSegmentTile<VoiceprintMic>(
-          key: const ValueKey('speech-voiceprint-mic'),
-          title: l10n.speechVoiceprintMic,
-          subtitle: l10n.speechVoiceprintMicHint,
-          segments: [
-            PillSegment(VoiceprintMic.normal, l10n.speechVoiceprintMicNormal),
-            PillSegment(VoiceprintMic.quiet, l10n.speechVoiceprintMicQuiet),
-            PillSegment(VoiceprintMic.faint, l10n.speechVoiceprintMicFaint),
-          ],
-          selected: call.voiceprintMic,
-          onChanged: on
-              ? (mic) => unawaited(calls.edit((saved) => saved.copyWith(voiceprintMic: mic)))
-              : null,
-        ),
-        SettingsSegmentTile<CallMicSource>(
-          key: const ValueKey('voiceprint-call-mic-source'),
-          title: l10n.speechCallMicSource,
-          // 有些机器（实测 Sony）在通话音源上降噪过狠，说话峰值只有 −74 dBFS，
-          // 而同一麦克风走识别音源是 −20.8。那种情况只能放弃 AEC 换电平。
-          subtitle: call.callMicSource == CallMicSource.auto
-              ? '自动：通话那一路比识别低 20dB 以上就换掉'
-              : call.callMicSource == CallMicSource.communication
-              ? '带回声消除，自己播的声音不会漏回来；但有些机器会把人声也压掉'
-              : '不降噪、电平高，但自己播的声音会漏回来——靠插话灵敏度去挡',
-          segments: [
-            PillSegment(CallMicSource.auto, l10n.speechCallMicAuto),
-            PillSegment(CallMicSource.communication, l10n.speechCallMicComm),
-            PillSegment(CallMicSource.recognition, l10n.speechCallMicRecog),
-          ],
-          selected: call.callMicSource,
-          onChanged: on
-              ? (src) => unawaited(calls.edit((saved) => saved.copyWith(callMicSource: src)))
-              : null,
-        ),
-      ],
-    );
-  }
-}
 
 /// The person's own cloud recognizer (OpenAI-compatible): saved as typed.
 class _CloudAsrForm extends ConsumerStatefulWidget {

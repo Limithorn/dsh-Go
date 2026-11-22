@@ -44,6 +44,17 @@ object Voiceprint {
     @Volatile var bias: Float = 0f
 
     /**
+     * 直接指定的 accept 门槛；NaN = 没指定，按 [level] + [bias] 算。
+     *
+     * 给设置页那个滑条用：滑条能拖到任意位置，比四档细。bias 是相对档位的
+     * 加减、取值受限（±0.20），滑条要的是绝对值，两者语义不同，所以另开
+     * 一个覆盖值而不是复用 bias。
+     *
+     * 覆盖优先于 level/bias 的合成结果；用户再切回档位时由 Dart 侧清成 NaN。
+     */
+    @Volatile var acceptOverride: Float = Float.NaN
+
+    /**
      * 静默检测的参数（"这段里到底有没有人说话"）。
      *
      * 采集电平跟着机器走：VOICE_COMMUNICATION + AEC 是正确的（声纹要和通话同
@@ -124,8 +135,17 @@ object Voiceprint {
         // 多一份模板同时让"取最高分"更容易命中，两者大致抵得上。
         //
         // 真嫌门槛被抬高，把那人的第二份删掉、或者调「这台机器微调」的 bias。
-        val accept = Thresholds.accept(level, n, gate, bias)
-        val reject = Thresholds.reject(level, n, gate, bias)
+        val computed = Thresholds.accept(level, n, gate, bias)
+        // 滑条拖过的值优先；只对通话闸生效——唤醒闸不播放、没有回声问题，
+        // 沿用档位基线，免得一个滑条同时改了两个闸的语义。
+        val accept = if (gate == Thresholds.Gate.BARGE && !acceptOverride.isNaN()) {
+            acceptOverride.coerceIn(0.05f, 0.97f)
+        } else {
+            computed
+        }
+        // reject 跟着 accept 走：两者之间要保持 BAND 的间距，否则中间那条
+        // "不确定带"会失效，UNKNOWN 不再被单独处理。
+        val reject = (accept - (computed - Thresholds.reject(level, n, gate, bias))).coerceAtLeast(0.05f)
         // 唤醒自己有个开关；通话看总开关。两者都用同一份模板。
         val on = if (gate == Thresholds.Gate.WAKE) wake else enabled
         return SpeakerGate.Cutoffs(

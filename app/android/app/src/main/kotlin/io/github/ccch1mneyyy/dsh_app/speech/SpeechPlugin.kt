@@ -230,6 +230,17 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                 capture?.currentGate()?.let { g -> (g as? SpeakerGate)?.configure(Voiceprint.cutoffs()) }
                 result.success(Voiceprint.describe())
             }
+            "voiceprintAccept" -> {
+                // 门槛滑条：拖到哪算哪，直接给绝对值。
+                //
+                // 传 null 表示「回到档位」——清掉覆盖值，让 level + bias 重新
+                // 决定门槛。设置页切回四档胶囊时这么调。
+                val v = call.argument<Double>("accept")
+                Voiceprint.acceptOverride = if (v == null) Float.NaN else v.toFloat()
+                // 立刻重算并推给正在跑的闸，不用等下一通电话。
+                capture?.currentGate()?.let { g -> (g as? SpeakerGate)?.configure(Voiceprint.cutoffs()) }
+                result.success(Voiceprint.acceptOverride.takeIf { !it.isNaN() }?.toDouble())
+            }
             "voiceprintGain" -> {
                 // 只设值，不量。量要走一次真实录音，见 voiceprintGainMeasure。
                 Voiceprint.fixedGain = (call.argument<Double>("gain") ?: 1.0)
