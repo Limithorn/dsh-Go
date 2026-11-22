@@ -40,6 +40,9 @@ class _Rig {
         sensitivity: CallBargeSensitivity.normal,
         voiceprint: voiceprint,
         voiceprintOthers: voiceprintOthers,
+        // fork 加的字段：通话的采集音源。测试里只关心"有这个字段"，
+        // 用默认档，具体解析在原生侧。
+        callMicSource: CallMicSource.auto,
       ),
       cutNote: (heard) => '（被打断在：$heard）',
       thinkingCue: () async => cues++,

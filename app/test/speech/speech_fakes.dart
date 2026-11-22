@@ -52,10 +52,14 @@ class FakeAudio extends SpeechAudio {
     required bool bargeIn,
     CallPause pause = CallPause.normal,
     CallBargeSensitivity sensitivity = CallBargeSensitivity.normal,
+    // fork 加的：通话采集用哪一路音源。替身也照签名收下，但只记名字——
+    // 真实解析在原生侧，测试里关心的是"传没传下去"。
+    CallMicSource micSource = CallMicSource.auto,
   }) async {
     calls.add('callStart:bargeIn=$bargeIn');
     calls.add('callStart:pause=${pause.name}');
     calls.add('callStart:sensitivity=${sensitivity.name}');
+    calls.add('callStart:micSource=${micSource.wire}');
     return start;
   }
 
