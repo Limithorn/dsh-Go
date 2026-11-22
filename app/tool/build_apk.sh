@@ -104,14 +104,32 @@ if [ "$MODE" = "release" ]; then
   PKGS="$DART/packages/flutter_tools/.dart_tool/package_config.json"
   if [ -x "$DART_SDK" ]; then
     echo "  AOT 预跑（避免并行卡死）..."
-    "$DART_SDK" --packages="$PKGS" "$TOOLS" assemble --no-version-check \
-      -dTargetFile=lib/main.dart -dTargetPlatform=android -dBuildMode=release \
-      -dFlavor=arm64 -dAndroidArchs=android-arm64 -dMinSdkVersion=26 \
-      --output build/app/intermediates/flutter/arm64Release \
-      android_aot_bundle_release_android-arm64 >> "$LOG" 2>&1
-    AOT_STATUS=$?
-    # 这一步失败不算致命：flutter build 自己会再做一次，只是可能卡。
-    [ $AOT_STATUS -ne 0 ] && echo "  ⚠ AOT 预跑失败（$AOT_STATUS），交给 flutter build 重试"
+    # 超时保护：这一步正常 2~3 分钟出 app.so，但如果上一次跑完 app.so
+    # 已经是最新的，它会在**收尾阶段空转**——进程活着、CPU 不涨、不再写
+    # 日志，看起来跟卡死一模一样，实测能挂 10 分钟以上。产物其实早就好了。
+    #
+    # 所以给 6 分钟上限：超时就算了，产物在就用，不在让 flutter build 自己做。
+    # 判据看 app.so 有没有，不看退出码——被超时杀掉时退出码不可靠。
+    AOT_SO="build/app/intermediates/flutter/arm64Release/arm64-v8a/app.so"
+    BEFORE=$(stat -c %Y "$AOT_SO" 2>/dev/null || echo 0)
+    if command -v timeout >/dev/null 2>&1; then
+      timeout 360 "$DART_SDK" --packages="$PKGS" "$TOOLS" assemble --no-version-check \
+        -dTargetFile=lib/main.dart -dTargetPlatform=android -dBuildMode=release \
+        -dFlavor=arm64 -dAndroidArchs=android-arm64 -dMinSdkVersion=26 \
+        --output build/app/intermediates/flutter/arm64Release \
+        android_aot_bundle_release_android-arm64 >> "$LOG" 2>&1
+      AOT_STATUS=$?
+    else
+      AOT_STATUS=0
+    fi
+    AFTER=$(stat -c %Y "$AOT_SO" 2>/dev/null || echo 0)
+    if [ "$AFTER" -gt "$BEFORE" ]; then
+      echo "  AOT 产物已更新"
+    elif [ "$AOT_STATUS" = "124" ]; then
+      echo "  ⚠ AOT 预跑超时（产物可能已经是新的，继续）"
+    elif [ $AOT_STATUS -ne 0 ]; then
+      echo "  ⚠ AOT 预跑失败（$AOT_STATUS），交给 flutter build 重试"
+    fi
   fi
 fi
 
