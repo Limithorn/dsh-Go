@@ -388,10 +388,10 @@ class _CallPipViewState extends State<CallPipView> {
               },
             ),
           ),
-            ],
-          ),
         ],
       ),
+    ),
+  ),
     );
   }
 }

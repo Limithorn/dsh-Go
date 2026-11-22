@@ -83,12 +83,14 @@ class AppPage extends StatefulWidget {
     required List<Widget> children,
     List<Widget> actions = const [],
     bool solidBar = true,
+    bool showLargeTitle = true,
   }) => AppPage(
     key: key,
     title: title,
     subtitle: subtitle,
     actions: actions,
     solidBar: solidBar,
+    showLargeTitle: showLargeTitle,
     slivers: [SliverList.list(children: children)],
   );
 
