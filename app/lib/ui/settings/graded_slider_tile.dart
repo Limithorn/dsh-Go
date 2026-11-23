@@ -58,9 +58,11 @@ class _GradedSliderTileState extends State<GradedSliderTile> {
 
   static String _defaultFormat(double v) => v.toStringAsFixed(2);
 
-  /// 就近吸附：距离最近刻度不到 3% 量程才吸。
+  /// 就近吸附：距离最近刻度不到 1.5% 量程才吸。
   ///
   /// 不做全量吸附——那样滑条就等于变成了四档选择，失去微调的意义。
+  /// 阈值从 3% 收到 1.5%：0.20~0.95 的 3% 是 0.0225，四档间隔 0.10，
+  /// 等于有 45% 的量程都能被"吸走"，拖起来到处都在跳。
   double _snapIfNear(double v) {
     if (widget.grades.isEmpty) return v;
     final span = widget.max - widget.min;
@@ -73,7 +75,7 @@ class _GradedSliderTileState extends State<GradedSliderTile> {
         best = g;
       }
     }
-    return bestDist <= span * 0.03 ? best : v;
+    return bestDist <= span * 0.015 ? best : v;
   }
 
   @override

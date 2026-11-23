@@ -218,6 +218,15 @@ class VoiceCallController extends ChangeNotifier {
   Timer? _cueTimer;
   bool _cued = false;
 
+  /// 进了「想一想」之后，等她的声音真的响起来的兜底计时器。
+  ///
+  /// 阶段前进靠 `SpeechOutStarted`，而那是系统 TTS 真的开始播才发的。手机
+  /// 没装中文语音包、或系统 TTS 被设成别的语言时，`speak()` 不报错、事件
+  /// 也永远不来——界面就停在「想一想」不动，看着像卡死。
+  ///
+  /// 这里等不到就把阶段退回去，并留一句错误说明，至少让人知道往哪查。
+  Timer? _voiceWatch;
+
   VoiceCloud? _cloud;
   StreamSubscription<SpeechAudioEvent>? _audioSub;
   StreamSubscription<CallReply>? _replySub;
@@ -476,6 +485,7 @@ class VoiceCallController extends ChangeNotifier {
     } else {
       _cueTimer = Timer(cueAfter, _cue);
       _set(CallPhase.thinking);
+      _watchVoice();
     }
     final sent = await conversation.send(message);
     if (_phase == CallPhase.ended || _disposed) return;
@@ -616,6 +626,22 @@ class VoiceCallController extends ChangeNotifier {
     }
   }
 
+  /// 进入「想一想」后盯着声音有没有响起来，超时就退回并说明原因。
+  static const voiceStartTimeout = Duration(seconds: 8);
+
+  void _watchVoice() {
+    _voiceWatch?.cancel();
+    final turn = _turn;
+    _voiceWatch = Timer(voiceStartTimeout, () {
+      // 已经离开这个回合了就别再插手。
+      if (_phase != CallPhase.thinking || turn != _turn) return;
+      if (_voiced) return;
+      _error = '语音没能播放出来。检查手机的「文字转语音」是否装了中文语音包';
+      _replyDone = true;
+      _set(CallPhase.listening);
+    });
+  }
+
   void _cue() {
     // Only before any reply text: the cue's stream would take the place of her voice's.
     if (_cued || !cueStill) return;
@@ -632,6 +658,7 @@ class VoiceCallController extends ChangeNotifier {
         case SpeechOutStarted():
           _voiced = true;
           _cueTimer?.cancel();
+          _voiceWatch?.cancel();
           if (_phase == CallPhase.thinking || _phase == CallPhase.listening) _set(CallPhase.speaking);
         case SpeechOutLevel(:final value):
           _voiceLevel = value;
@@ -727,6 +754,7 @@ class VoiceCallController extends ChangeNotifier {
     _ended = why;
     _overTimer?.cancel();
     _cueTimer?.cancel();
+    _voiceWatch?.cancel();
     _stopVoice();
     unawaited(audio.stopCall());
     unawaited(_replySub?.cancel());

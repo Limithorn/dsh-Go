@@ -23,26 +23,6 @@ import 'voiceprint_entry_page.dart';
 class VoiceprintSection extends ConsumerWidget {
   const VoiceprintSection({super.key});
 
-  Future<void> _pickLevel(BuildContext context, WidgetRef ref, CallSettings call) async {
-    final picked = await showChoicePage<VoiceprintLevel>(
-      context,
-      title: '判定门槛',
-      selected: call.voiceprintLevel,
-      footer: '录了多份模板时门槛会自动抬高（每多一份约 +0.045），'
-          '避免人多之后误认。想精确调可以用下面的滑条。',
-      options: const [
-        ChoiceOption(VoiceprintLevel.loose, '宽松', subtitle: '声音像一点就认。适合只有你一个人用，代价是旁人更容易被认成你'),
-        ChoiceOption(VoiceprintLevel.normal, '标准', subtitle: '默认。本人正常说话能过，旁人基本过不去'),
-        ChoiceOption(VoiceprintLevel.strict, '严格', subtitle: '要多说几句、说得清楚才认。适合多人共用一台机器'),
-        ChoiceOption(VoiceprintLevel.veryStrict, '最严', subtitle: '只认非常像的。本人说轻一点、离远一点就可能认不出来'),
-      ],
-    );
-    if (picked == null || !context.mounted) return;
-    await ref.read(callSettingsProvider.notifier).edit((s) => s.copyWith(voiceprintLevel: picked));
-    // 切回档位 = 清掉滑条给出的绝对值，让档位重新说话。
-    await VoiceprintChannel().setAccept(null);
-  }
-
   Future<void> _pickEnrollSource(BuildContext context, WidgetRef ref) async {
     final current = ref.read(enrollSourceProvider);
     final picked = await showChoicePage<VoiceProfileSource>(
@@ -106,7 +86,9 @@ class VoiceprintSection extends ConsumerWidget {
               key: const ValueKey('vp-accept'),
               title: '判定门槛',
               subtitle: '声音多像你才算你。调高更严，旁人不容易被认成你，但你自己也可能被挡住',
-              value: _acceptOf(call.voiceprintLevel),
+              // 从 provider 读，不再从档位算——之前每次重建都退回档位基线，
+              // 拖到哪都像被吸回四档上去。四档现在是刻度，拖到附近才吸。
+              value: ref.watch(vpAcceptProvider),
               min: 0.20,
               max: 0.95,
               enabled: on,
@@ -116,15 +98,10 @@ class VoiceprintSection extends ConsumerWidget {
                 (0.60, '严格'),
                 (0.70, '最严'),
               ],
-              onCommit: (v) => unawaited(VoiceprintChannel().setAccept(v)),
-            ),
-            SettingsTile(
-              key: const ValueKey('vp-level'),
-              title: '按档位选',
-              subtitle: '四档快捷值，选它就离开滑条的微调',
-              enabled: on,
-              value: Text(_levelName(call.voiceprintLevel)),
-              onTap: on ? () => unawaited(_pickLevel(context, ref, call)) : null,
+              onCommit: (v) {
+                ref.read(vpAcceptProvider.notifier).state = v;
+                unawaited(VoiceprintChannel().setAccept(v));
+              },
             ),
             SettingsSegmentTile<VoiceprintMic>(
               key: const ValueKey('vp-silence'),
@@ -183,8 +160,8 @@ class VoiceprintSection extends ConsumerWidget {
           children: [
             SettingsTile(
               key: const ValueKey('vp-entry'),
-              title: '声音管理与测试',
-              subtitle: '录模板、测一句看判成什么、诊断链路、实景插话测试',
+              title: '我的声音',
+              subtitle: '录入与删除、链路自测、实景插话测试',
               enabled: on,
               onTap: on
                   ? () => unawaited(Navigator.of(context).push(
@@ -206,24 +183,25 @@ class VoiceprintSection extends ConsumerWidget {
     );
   }
 
-  /// 档位对应的基线门槛（BARGE 闸）。
-  ///
-  /// 和 `Thresholds.baseFor` 保持一致；这里只用于滑条的初始位置显示，
-  /// 真正生效的值在原生侧。
-  static double _acceptOf(VoiceprintLevel l) => switch (l) {
+}
+
+/// 判定门槛滑条的当前值。
+///
+/// 为什么不直接读 `call.voiceprintLevel`：档位只有四个离散值，滑条要能
+/// 停在任意位置。曾经每次重建都从档位算回来，于是拖到 0.53、松手后界面
+/// 又跳回 0.50——看起来像"一定吸附到档位"。
+///
+/// 内存态而非持久化：真正的值推给原生（`acceptOverride`），重启后回到
+/// 档位基线是合理的——档位本来就是持久化的那个，滑条只是当次微调。
+final vpAcceptProvider = StateProvider<double>((ref) {
+  final level = ref.watch(callSettingsProvider).voiceprintLevel;
+  return switch (level) {
     VoiceprintLevel.loose => 0.40,
     VoiceprintLevel.normal => 0.50,
     VoiceprintLevel.strict => 0.60,
     VoiceprintLevel.veryStrict => 0.70,
   };
-
-  static String _levelName(VoiceprintLevel l) => switch (l) {
-    VoiceprintLevel.loose => '宽松',
-    VoiceprintLevel.normal => '标准',
-    VoiceprintLevel.strict => '严格',
-    VoiceprintLevel.veryStrict => '最严',
-  };
-}
+});
 
 /// 录入音源。存在 `VoiceProfile` 之外的地方，用一层内存态先兜住——
 /// 正式存储等录入流程改造时再接（见 voice-settings-audit §10）。
