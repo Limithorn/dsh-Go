@@ -175,14 +175,25 @@ internal object SpeakerScreenTest {
         val warmTarget = RATE * 400 / 1000
         while (warm < warmTarget && running.get()) {
             val n = runCatching { record.read(buffer, 0, buffer.size) }.getOrDefault(-1)
-            if (n <= 0) break
+            // read 一直不返回正数时这个循环会空转到 running 被置 false，
+            // 外面看到的就是"启动了但一个窗口都没判"。打出来才分得清是
+            // "麦克风没给数据"还是"给了但太小声"。
+            if (n <= 0) {
+                Log.w(TAG, "warm read returned $n after ${warm} samples; giving up warm-up")
+                break
+            }
             warm += n
         }
+        Log.i(TAG, "warm-up done: $warm samples (target $warmTarget)")
 
+        var totalRead = 0L
+        var windows = 0
+        var lastBeat = 0L
         try {
             while (running.get()) {
                 val n = runCatching { record.read(buffer, 0, buffer.size) }.getOrDefault(-1)
                 if (n <= 0) continue
+                totalRead += n
                 var i = 0
                 while (i < n) {
                     val take = minOf(n - i, window.size - filled)
@@ -192,6 +203,12 @@ internal object SpeakerScreenTest {
                     if (filled < window.size) continue
                     filled = 0
                     onWindow(judge(FloatArray(window.size) { window[it] / 32768f }))
+                    windows++
+                    // 每 2 秒报一次：证明采集真的在推进，以及电平大概多少。
+                    if (System.currentTimeMillis() - lastBeat > 2000) {
+                        lastBeat = System.currentTimeMillis()
+                        Log.i(TAG, "beat: windows=$windows samples=$totalRead")
+                    }
                     if (!running.get()) break
                 }
             }
