@@ -83,6 +83,10 @@ class VoiceCallHost extends ChangeNotifier {
       bias: settings.voiceprintBias,
       mic: settings.voiceprintMic,
     );
+    // 门槛滑条的绝对值单独推：它不走 configure 那套（那条路传的是档位），
+    // 直接设覆盖值。null 表示"回到档位"，这里也要推——否则用户从滑条切回
+    // 档位后，原生还记着上一次的绝对值。
+    await VoiceprintChannel().setAccept(settings.voiceprintAccept);
     // 增益单独推：它不属于 voiceprint 那套配置（即便声纹关着，录音电平
     // 偏低时通话页也受益），而且要在 configure 之后再设，免得被覆盖。
     await VoiceprintChannel().setGain(settings.micGain);

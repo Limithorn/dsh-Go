@@ -148,6 +148,7 @@ class CallSettings {
     this.voiceprintOthers = true,
     this.voiceprintLevel = VoiceprintLevel.normal,
     this.voiceprintBias = 0,
+    this.voiceprintAccept,
     // 默认改成固定通话音源。
     //
     // 原默认是 auto：启动时开三条音源各量 1.5 秒再挑，整个过程同步发生在
@@ -214,6 +215,15 @@ class CallSettings {
   /// 单位就是余弦分：−0.20 ~ +0.20。0 表示完全按档位算。
   final double voiceprintBias;
 
+  /// 判定门槛的绝对值（余弦分）；null 表示按 [voiceprintLevel] + [voiceprintBias] 算。
+  ///
+  /// 设置页那个滑条写这里。和 [voiceprintBias] 的区别：bias 是"在档位上加减
+  /// 多少"，受 ±0.20 限制；滑条要能拖到 0.20~0.95 任意位置，所以存绝对值。
+  ///
+  /// 存到设置里而不是放内存：之前放过 provider，结果是**改任何一个别的选项
+  /// 都会把它冲回档位基线**——用户看到的就是"动了别的开关，滑条自己跳回 0.4"。
+  final double? voiceprintAccept;
+
   /// 通话时用哪一路声音听人说话。见 [CallMicSource]。
   final CallMicSource callMicSource;
 
@@ -235,6 +245,12 @@ class CallSettings {
   /// 整体抬一截，人声/回声/底噪的比例原样保留。
   final double micGain;
 
+  /// copyWith 的哨兵：区分「这个参数没给」和「给的是 null」。
+  ///
+  /// 只有 voiceprintAccept 需要它——别的字段都是值类型，null 天然表示"不改"；
+  /// 而它本身可空，`null` 又是有意义的值（回到档位），两种语义得分得开。
+  static const _unset = Object();
+
   CallSettings copyWith({
     bool? bargeIn,
     bool? spoken,
@@ -249,6 +265,8 @@ class CallSettings {
     bool? voiceprintOthers,
     bool? voiceprintWake,
     VoiceprintLevel? voiceprintLevel,
+    // 用 sentinel 区分「不改」和「设成 null」——用户切回档位时要把覆盖值清掉。
+    Object? voiceprintAccept = _unset,
     double? voiceprintBias,
     CallMicSource? callMicSource,
     VoiceprintMic? voiceprintMic,
@@ -268,6 +286,9 @@ class CallSettings {
     voiceprintWake: voiceprintWake ?? this.voiceprintWake,
     voiceprintLevel: voiceprintLevel ?? this.voiceprintLevel,
     voiceprintBias: voiceprintBias ?? this.voiceprintBias,
+    voiceprintAccept: identical(voiceprintAccept, _unset)
+        ? this.voiceprintAccept
+        : voiceprintAccept as double?,
     callMicSource: callMicSource ?? this.callMicSource,
     voiceprintMic: voiceprintMic ?? this.voiceprintMic,
     micGain: micGain ?? this.micGain,
@@ -313,6 +334,7 @@ class CallSettingsController extends Notifier<CallSettings> {
         voiceprint: json['voiceprint'] == true,
         voiceprintOthers: json['voiceprintOthers'] != false,
         voiceprintWake: json['voiceprintWake'] == true,
+        voiceprintAccept: (json['voiceprintAccept'] as num?)?.toDouble(),
         voiceprintLevel: VoiceprintLevel.values.firstWhere(
           (l) => l.wire == json['voiceprintLevel'],
           orElse: () => VoiceprintLevel.normal,
@@ -367,6 +389,7 @@ class CallSettingsController extends Notifier<CallSettings> {
         previous.voiceprintWake != next.voiceprintWake ||
         previous.voiceprintLevel != next.voiceprintLevel ||
         previous.voiceprintBias != next.voiceprintBias ||
+        previous.voiceprintAccept != next.voiceprintAccept ||
         previous.voiceprintMic != next.voiceprintMic ||
         previous.callMicSource != next.callMicSource ||
         previous.micGain != next.micGain) {
@@ -389,6 +412,7 @@ class CallSettingsController extends Notifier<CallSettings> {
         'voiceprintOthers': next.voiceprintOthers,
         'voiceprintWake': next.voiceprintWake,
         'voiceprintLevel': next.voiceprintLevel.wire,
+        'voiceprintAccept': next.voiceprintAccept,
         'voiceprintBias': next.voiceprintBias,
         'callMicSource': next.callMicSource.wire,
         'voiceprintMic': next.voiceprintMic.wire,

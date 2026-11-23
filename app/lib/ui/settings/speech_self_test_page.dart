@@ -201,7 +201,7 @@ class _SpeechSelfTestPageState extends ConsumerState<SpeechSelfTestPage> {
   Float32List? _lastVector;
 
   Future<_Result> _probeMatch() async {
-    final profiles = ref.read(voiceprintProfilesProvider).value ?? const <VoiceProfile>[];
+    final profiles = await ref.read(voiceprintProfilesProvider.future);
     if (profiles.isEmpty) {
       return const _Result(_Verdict.skipped, '还没录入过声音');
     }
@@ -226,7 +226,7 @@ class _SpeechSelfTestPageState extends ConsumerState<SpeechSelfTestPage> {
 
   Future<_Result> _probeThresholds() async {
     final call = ref.read(callSettingsProvider);
-    final profiles = ref.read(voiceprintProfilesProvider).value ?? const <VoiceProfile>[];
+    final profiles = await ref.read(voiceprintProfilesProvider.future);
     final dart = VoiceprintChannel.acceptFor(call.voiceprintLevel.wire, profiles.length) + call.voiceprintBias;
     final d = await _channel.describe();
     if (d == null) return const _Result(_Verdict.skipped, '读不到原生状态');

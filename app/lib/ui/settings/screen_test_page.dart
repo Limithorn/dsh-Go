@@ -136,9 +136,9 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
   /// 不接大模型：会话换成 [ScriptedCallConversation]，只念固定台词，
   /// 不花 token、不受网络影响、每次跑的结果可比。
   Future<void> _openCallTest() async {
-    final profiles = ref.read(voiceprintProfilesProvider).value ?? const <VoiceProfile>[];
+    final profiles = await ref.read(voiceprintProfilesProvider.future);
     if (profiles.isEmpty) {
-      setState(() => _note = '还没有录入声音，先录一份再来测');
+      setState(() => _note = '还没有声纹模板。先去「我的声音 → 我的声纹」录一份再回来');
       return;
     }
     // 先停掉本页自己的采集：它和通话页抢麦克风。
@@ -160,7 +160,7 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
   }
 
   Future<void> _start() async {
-    final profiles = ref.read(voiceprintProfilesProvider).value ?? const <VoiceProfile>[];
+    final profiles = await ref.read(voiceprintProfilesProvider.future);
     if (profiles.isEmpty) {
       setState(() => _note = '还没有录入声音，先录一份再来测');
       return;

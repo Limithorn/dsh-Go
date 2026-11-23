@@ -23,6 +23,16 @@ import 'voiceprint_entry_page.dart';
 class VoiceprintSection extends ConsumerWidget {
   const VoiceprintSection({super.key});
 
+  /// 滑条该显示在哪个位置：用户拖过的绝对值优先，否则按档位基线。
+  static double _acceptOf(CallSettings call) =>
+      call.voiceprintAccept ??
+      switch (call.voiceprintLevel) {
+        VoiceprintLevel.loose => 0.40,
+        VoiceprintLevel.normal => 0.50,
+        VoiceprintLevel.strict => 0.60,
+        VoiceprintLevel.veryStrict => 0.70,
+      };
+
   Future<void> _pickEnrollSource(BuildContext context, WidgetRef ref) async {
     final current = ref.read(enrollSourceProvider);
     final picked = await showChoicePage<VoiceProfileSource>(
@@ -86,9 +96,10 @@ class VoiceprintSection extends ConsumerWidget {
               key: const ValueKey('vp-accept'),
               title: '判定门槛',
               subtitle: '声音多像你才算你。调高更严，旁人不容易被认成你，但你自己也可能被挡住',
-              // 从 provider 读，不再从档位算——之前每次重建都退回档位基线，
-              // 拖到哪都像被吸回四档上去。四档现在是刻度，拖到附近才吸。
-              value: ref.watch(vpAcceptProvider),
+              // 从设置里读。之前放 provider，结果是改任何一个别的选项都会把
+              // 它冲回档位基线（provider 被重建），用户看到"滑条自己跳回 0.4"。
+              // 存在 CallSettings 里就跟着设置走，不会被别人冲掉。
+              value: _acceptOf(call),
               min: 0.20,
               max: 0.95,
               enabled: on,
@@ -99,7 +110,7 @@ class VoiceprintSection extends ConsumerWidget {
                 (0.70, '最严'),
               ],
               onCommit: (v) {
-                ref.read(vpAcceptProvider.notifier).state = v;
+                unawaited(ref.read(callSettingsProvider.notifier).edit((s) => s.copyWith(voiceprintAccept: v)));
                 unawaited(VoiceprintChannel().setAccept(v));
               },
             ),
@@ -184,24 +195,6 @@ class VoiceprintSection extends ConsumerWidget {
   }
 
 }
-
-/// 判定门槛滑条的当前值。
-///
-/// 为什么不直接读 `call.voiceprintLevel`：档位只有四个离散值，滑条要能
-/// 停在任意位置。曾经每次重建都从档位算回来，于是拖到 0.53、松手后界面
-/// 又跳回 0.50——看起来像"一定吸附到档位"。
-///
-/// 内存态而非持久化：真正的值推给原生（`acceptOverride`），重启后回到
-/// 档位基线是合理的——档位本来就是持久化的那个，滑条只是当次微调。
-final vpAcceptProvider = StateProvider<double>((ref) {
-  final level = ref.watch(callSettingsProvider).voiceprintLevel;
-  return switch (level) {
-    VoiceprintLevel.loose => 0.40,
-    VoiceprintLevel.normal => 0.50,
-    VoiceprintLevel.strict => 0.60,
-    VoiceprintLevel.veryStrict => 0.70,
-  };
-});
 
 /// 录入音源。存在 `VoiceProfile` 之外的地方，用一层内存态先兜住——
 /// 正式存储等录入流程改造时再接（见 voice-settings-audit §10）。
