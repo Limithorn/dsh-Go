@@ -154,15 +154,29 @@ class VoiceprintStore {
 
   final FlutterSecureStorage _secure;
 
+  /// 上一次读取失败的原因；null 表示没失败过。
+  ///
+  /// 界面上要和"确实还没录"区分开：同样是空列表，一种是用户没录过，
+  /// 一种是加密存储读不出来（换签名重装、keystore 失效）。后者静默返回
+  /// 空列表会让人以为模板丢了、反复重录——所以把原因留在这里给诊断页看。
+  String? lastReadError;
+
   Future<List<VoiceProfile>> read() async {
+    lastReadError = null;
     try {
       final raw = await _secure.read(key: _key);
       if (raw == null || raw.isEmpty) return const [];
       final decoded = jsonDecode(raw);
-      if (decoded is! List) return const [];
-      return decoded.map(VoiceProfile.fromJson).whereType<VoiceProfile>().take(maxProfiles).toList();
-    } on Object {
+      if (decoded is! List) {
+        lastReadError = '存的不是列表';
+        return const [];
+      }
+      final out = decoded.map(VoiceProfile.fromJson).whereType<VoiceProfile>().take(maxProfiles).toList();
+      if (out.isEmpty && decoded.isNotEmpty) lastReadError = '${decoded.length} 条都解析失败了';
+      return out;
+    } on Object catch (e) {
       // 读不出来（换机、keystore 失效）：当作还没有，不影响通话。
+      lastReadError = e.toString().split('\n').first;
       return const [];
     }
   }
@@ -239,6 +253,9 @@ class VoiceprintListController extends AsyncNotifier<List<VoiceProfile>> {
 
   @override
   Future<List<VoiceProfile>> build() => _store.read();
+
+  /// 模板读不出来时的原因（null = 没读失败过，空列表就是真没录）。
+  String? get readError => _store.lastReadError;
 
   Future<void> add(VoiceProfile profile) async {
     state = AsyncData(await _store.add(profile));

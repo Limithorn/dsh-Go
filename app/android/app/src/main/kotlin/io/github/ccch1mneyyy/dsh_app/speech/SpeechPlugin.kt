@@ -169,7 +169,7 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                     startCall(
                         call.argument<Boolean>("bargeIn") ?: true,
                         TurnPause.of(call.argument<String>("pause")),
-                        call.argument<Double>("bargeOffset")?.toFloat() ?: 0f,
+                        call.argument<Double>("offset")?.toFloat() ?: 0f,
                     ),
                 )
             }

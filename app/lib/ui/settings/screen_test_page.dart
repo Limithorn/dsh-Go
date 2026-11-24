@@ -138,7 +138,12 @@ class _ScreenTestPageState extends ConsumerState<ScreenTestPage> {
   Future<void> _openCallTest() async {
     final profiles = await ref.read(voiceprintProfilesProvider.future);
     if (profiles.isEmpty) {
-      setState(() => _note = '还没有声纹模板。先去「我的声音 → 我的声纹」录一份再回来');
+      // 空列表有两种可能：真没录，或者加密存储读不出来。后者如果只说
+      // "还没录"，用户会反复重录——永远录不出结果，因为写进去也读不回。
+      final why = ref.read(voiceprintProfilesProvider.notifier).readError;
+      setState(() => _note = why == null
+          ? '还没有声纹模板。先去「我的声音 → 我的声纹」录一份再回来'
+          : '声纹模板读不出来（$why）。换签名重装后加密存储会失效，需要重新录一份');
       return;
     }
     // 先停掉本页自己的采集：它和通话页抢麦克风。

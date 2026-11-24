@@ -395,6 +395,19 @@ class VoiceCallController extends ChangeNotifier {
         _onJudge(kind, score, matched);
       case Utterance(:final wav, :final duration):
         unawaited(const DiagnosticsChannel().recordVoiceStage('utterance_ready'));
+        // 她正在想或正在说，而这一段不是插话：丢掉，别送去识别。
+        //
+        // 麦克风在这两个阶段一直是开着的（`_set` 只管状态，不停采集），所以
+        // 模型思考时的环境音、她自己的呼吸和回声尾巴都会被切成一"句"。
+        // 送进云端 ASR 转不出字，回来就是「识别失败」——用户看到提示反复跳。
+        //
+        // 为什么加 `!_over`：她说话时用户**真的**开口打断，那一段是要用的，
+        // 不能一起丢。
+        if ((_phase == CallPhase.thinking || _phase == CallPhase.speaking) && !_over) {
+          unawaited(const DiagnosticsChannel().recordVoiceStage('utterance_dropped'));
+          _live = '';
+          return;
+        }
         // Finished before [confirmAfter]: the words decide.
         _overTimer?.cancel();
         // The live words stand in until the recognizer's come back.
