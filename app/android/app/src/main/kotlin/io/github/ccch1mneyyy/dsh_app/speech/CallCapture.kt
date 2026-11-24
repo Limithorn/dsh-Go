@@ -87,6 +87,17 @@ class CallCapture(
         private set
 
     /**
+     * 用不用自己写的 AEC。默认跟随全局开关；SpeechPlugin 在 callStart 时
+     * 按设置显式赋值。开启时不挂系统 AudioEffect，采集源也切成不带 HAL AEC
+     * 的那一类，避免两套消除器同时改同一路信号。
+     */
+    @Volatile var softwareAec: Boolean = SoftwareAec.enabled
+
+    /** 这一通是否真的走了软件 AEC（诊断和取证都记它）。 */
+    @Volatile internal var softwareAecActive: Boolean = false
+        private set
+
+    /**
      * 通话采集用哪个音源。
      *
      * 默认 VOICE_COMMUNICATION：带 AEC，自己的播放声不会漏回来。
@@ -123,15 +134,22 @@ class CallCapture(
             r.release()
             return false
         }
-        // 交给 AecSupport：它把"能不能拿到对象""真的启用没有""音源自不带"
-        // 分开记，13 和 14 上表现不同也能说清楚断在哪一层。
-        val report = AecSupport.attach(r, effects)
-        echoCancelled = report.effective
+        // 软件 AEC 接管时不挂系统效果器：VOICE_COMMUNICATION 的 HAL AEC
+        // 是音源自带的，关不掉；再由它先削一遍、我们拿残差去减参考，等于
+        // 两个滤波器学同一条通路，近端人声会被一起吃掉。
+        val useSoftware = softwareAec && SoftwareAec.enabled
+        val report = if (useSoftware) AecSupport.software(preferredSource) else AecSupport.attach(r, effects)
+        // gate 只关心"回声还应不应该当成插话"，软件 AEC 和 HAL AEC 都算已处理。
+        echoCancelled = report.effective || useSoftware
         lastAec = report
+        softwareAecActive = useSoftware
+        if (useSoftware) SoftwareAec.begin()
         val g = createGate(echoCancelled).also { it.pause = pause; it.bargeOffset = bargeOffset }
         val started = runCatching { r.startRecording() }.isSuccess && r.recordingState == AudioRecord.RECORDSTATE_RECORDING
         if (!started) {
             g.close()
+            if (useSoftware) SoftwareAec.end()
+            softwareAecActive = false
             releaseEffects()
             r.release()
             return false
@@ -186,6 +204,10 @@ class CallCapture(
                     if (++tick % 2 == 0) post(mine) { listener.onLevel(0.0) }
                     continue
                 }
+                // 软件 AEC 必须在增益/电平/闸门之前：参考是播放侧的原始 PCM，
+                // 采集这端也得保持原始量纲，减完再一起放大才不会把回声比例搞乱。
+                // 取证 tap 和 utterance 因此在下游，录到的是消完回声的音频。
+                if (softwareAecActive) SoftwareAec.processCapture(frame)
                 // 固定增益：在算电平和判定之前放大。
                 //
                 // 必须放在最前面——levelOf 算出的电平、gate.consume 拿到的
@@ -253,6 +275,8 @@ class CallCapture(
         session++
         running = false
         openedSource = 0
+        if (softwareAecActive) SoftwareAec.end()
+        softwareAecActive = false
         val r = record ?: return
         record = null
         gate = null

@@ -183,7 +183,8 @@ class WakeController extends Notifier<WakeState> {
   Future<bool> _isKnownVoice(Float32List heard) async {
     final settings = ref.read(callSettingsProvider);
     if (!settings.voiceprint || !settings.voiceprintWake) return true;
-    final profiles = ref.read(voiceprintProfilesProvider).value ?? const <VoiceProfile>[];
+    // 同上：唤醒也认声音，模板为空会让唤醒时的声纹判定形同虚设。
+    final profiles = await ref.read(voiceprintProfilesProvider.future);
     if (profiles.isEmpty) return true;
     if (heard.length < 8000) return true;
     // 判定交给原生：模型和模板都在那边，阈值也按唤醒那道闸算。

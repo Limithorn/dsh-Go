@@ -73,7 +73,10 @@ class VoiceCallHost extends ChangeNotifier {
   /// 原生立刻回到直通——这也是"关闭时行为与今天一致"的落点。
   static Future<void> _pushVoiceprint(ProviderContainer container) async {
     final settings = container.read(callSettingsProvider);
-    final profiles = container.read(voiceprintProfilesProvider).value ?? const <VoiceProfile>[];
+    // 必须 await：这里是把模板推给原生。原来读 `.value`，provider 还在解密
+    // 读盘时拿到 null，`?? []` 就变成了"推一个空列表"——原生从此认为没模板，
+    // 实景测试逐条报 `没模板`，而 Dart 侧明明有。等它真读完。
+    final profiles = await container.read(voiceprintProfilesProvider.future);
     await VoiceprintChannel().configure(
       enabled: settings.voiceprint,
       allowOthers: settings.voiceprintOthers,

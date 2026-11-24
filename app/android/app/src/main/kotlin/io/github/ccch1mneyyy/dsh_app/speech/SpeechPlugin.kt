@@ -49,6 +49,10 @@ import io.github.ccch1mneyyy.dsh_app.nativemedia.TurnPause
  * `screenTestWindow` 每条都带 `source`（本轮实际打开的音源）；诊断用的
  * `micSourceReport` 报两条路径各自的选择与依据，`micSourceProbe` 手动再量一次。
  *
+ * 自建 AEC —— 默认开启，见 [SoftwareAec]：播放端在写 AudioTrack 之前喂参考，
+ * 采集端在增益/判决之前消回声；这条路径固定用 VOICE_RECOGNITION（无 HAL AEC），
+ * 不挂系统 AudioEffect。诊断页可关掉回到原系统 AEC 路径。
+ *
  * Events come back as `event` calls with a `type`: `play` {what: start|done|stopped|error, id},
  * `playLevel` {id, value}, `speechStart` {over}, `utterance` {wav, ms}, `micLevel` {value},
  * `callError` {reason}. When the person speaks over a call stream with barge-in on, the stream is
@@ -59,6 +63,7 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
     private lateinit var context: Context
     private val main = Handler(Looper.getMainLooper())
     private val audio by lazy { context.getSystemService(AudioManager::class.java) }
+    private val aecPrefs by lazy { context.getSharedPreferences("software_aec", Context.MODE_PRIVATE) }
 
     private var stream: PcmStream? = null
     private var focus: AudioFocusRequest? = null
@@ -101,6 +106,7 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
+        SoftwareAec.setEnabled(aecPrefs.getBoolean("enabled", true))
         methods = MethodChannel(binding.binaryMessenger, CHANNEL).also { it.setMethodCallHandler(this) }
     }
 
@@ -296,12 +302,27 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
             }
             // 实景测试：TTS 正在说话时量"能不能被打断"。
             // 只负责采集和判定；说什么由 Dart 侧用 TTS 放。
+            // ── 取证 ─────────────────────────────────────────────────
+            // 通话链路全程 PCM + 判决事件落盘。默认关，诊断页按需开停。
+            "probeStart" -> result.success(
+                VoiceProbe.start(File(context.getExternalFilesDir(null) ?: context.filesDir, "voice-probe")),
+            )
+            "probeStop" -> result.success(VoiceProbe.stop())
+            "probeStatus" -> result.success(VoiceProbe.status())
             // ── AEC 诊断 ───────────────────────────────────────────────
             // 逐层报告：ROM 说支持吗 / 拿到对象了吗 / 真启用了吗 / 音源自不带。
             // 13 和 14 上断在不同层，光看一个"开/关"判断不出来。
             "aecReport" -> {
                 val fromCapture = capture?.lastAec ?: SpeakerScreenTest.lastAec
                 result.success(fromCapture?.let { AecSupport.run { it.toMap() } } ?: emptyMap<String, Any?>())
+            }
+            // 自建 AEC 的开关与实时状态。关闭后回退到系统 HAL AEC 原路径。
+            "softwareAecStatus" -> result.success(SoftwareAec.report())
+            "softwareAecSet" -> {
+                val on = call.argument<Boolean>("enabled") ?: SoftwareAec.enabled
+                SoftwareAec.setEnabled(on)
+                aecPrefs.edit().putBoolean("enabled", on).apply()
+                result.success(SoftwareAec.report())
             }
             // 音源诊断：通话和实景测试各自最近一次选了哪一路，依据是量到的什么。
             //
@@ -357,6 +378,7 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                             MediaRecorder.AudioSource.VOICE_COMMUNICATION, false, ms,
                             play = { play.start() }, stopPlay = { play.stop() },
                         )
+                        VoiceProbe.event("echoProbe", mapOf("config" to "vcNoAec", "leak" to r.leak, "usable" to r.usable))
                         mapOf("playing" to r.playingDb, "silent" to r.silentDb, "leak" to r.leak, "usable" to r.usable)
                     }
                     Thread.sleep(300)
@@ -366,6 +388,7 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                             MediaRecorder.AudioSource.VOICE_COMMUNICATION, true, ms,
                             play = { play.start() }, stopPlay = { play.stop() },
                         )
+                        VoiceProbe.event("echoProbe", mapOf("config" to "vcAec", "leak" to r.leak, "usable" to r.usable, "aecOn" to r.aecOn))
                         mapOf(
                             "playing" to r.playingDb, "silent" to r.silentDb,
                             "leak" to r.leak, "usable" to r.usable, "aecOn" to r.aecOn,
@@ -378,6 +401,7 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                             MediaRecorder.AudioSource.VOICE_RECOGNITION, false, ms,
                             play = { play.start() }, stopPlay = { play.stop() },
                         )
+                        VoiceProbe.event("echoProbe", mapOf("config" to "vrNoAec", "leak" to r.leak, "usable" to r.usable))
                         mapOf("playing" to r.playingDb, "silent" to r.silentDb, "leak" to r.leak, "usable" to r.usable)
                     }
                 } finally {
@@ -447,6 +471,10 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
                     main.post { runCatching { enterComm() } }
                     val ok = runCatching {
                         SpeakerScreenTest.start(pick.source) { w ->
+                            VoiceProbe.event(
+                                "screenTestWindow",
+                                mapOf("kind" to w.kind, "score" to w.score, "rms" to w.rms, "barged" to w.barged, "source" to pick.chosen),
+                            )
                             // 回调在采集线程上，转回主线程再往 Dart 送。
                             // 默认留最近 6 段：够看清"哪一段出了问题"，又不至于把存储占满。
                             if (screenTestSaved < SCREEN_TEST_KEEP) {
@@ -633,6 +661,7 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
 
     private val streamListener = object : PcmStream.Listener {
         override fun onStart(stream: PcmStream) {
+            VoiceProbe.event("playStart", mapOf("id" to stream.id, "call" to stream.call))
             send("play", "what" to "start", "id" to stream.id)
             syncPlaying()
         }
@@ -647,6 +676,7 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
     }
 
     private fun ended(s: PcmStream, what: String) {
+        VoiceProbe.event("playEnd", mapOf("id" to s.id, "call" to s.call, "what" to what))
         if (stream === s) {
             stream = null
             abandonFocus()
@@ -757,6 +787,15 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
         // 模型没就绪、或这台机器加载不了，gateFor 返回 null，行为与原来逐帧一致。
         Voiceprint.warmUp(context.assets)
         Voiceprint.onVerdict = { v ->
+            VoiceProbe.event(
+                "speakerJudge",
+                mapOf(
+                    "over" to v.overPlayback,
+                    "kind" to v.kind.name,
+                    "score" to v.score,
+                    "matched" to v.matched,
+                ),
+            )
             main.post {
                 methods.invokeMethod(
                     "event",
@@ -782,10 +821,15 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
         c.bargeIn = bargeIn
         c.pause = pause
         c.bargeOffset = offset
-        // 通话采集走哪一路：和实景测试同一个决定（[MicSource]），设置里的
-        // 「通话收音」是唯一入口。auto 时这里会真的开三条音源各量 1.5 秒
-        // （约 4.5 秒，同步发生在主线程上——和改动前一样，没在这里顺手改时序）。
-        c.preferredSource = MicSource.resolve(callMicSource, "call").source
+        // 通话采集走哪一路。软件 AEC 要的是不带 HAL AEC 的原始采集，固定
+        // VOICE_RECOGNITION（Xperia 上它比 VC 高 53 dB，不是退而求其次）；
+        // 关掉软件 AEC 才回到设置里的「通话收音」，auto 时仍会量三条音源。
+        c.softwareAec = SoftwareAec.enabled
+        c.preferredSource = if (SoftwareAec.enabled) {
+            MicSource.software("call").source
+        } else {
+            MicSource.resolve(callMicSource, "call").source
+        }
         val am = audio
         // 方案 D：通话全程进通信模式（含免提）。只有通信模式把播放轨 remap 到
         // STRATEGY_PHONE / vocoder 链路，AEC 才能从「通信下行」抽到参考、消掉 AI
@@ -804,6 +848,22 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
             return "microphone"
         }
         capture = c
+        // 取证：这一通的全部前置条件。PCM 里听不出"本来用的是哪条音源 /
+        // 哪条输出路由"，只能靠这里的配置快照和事件时间轴还原。
+        VoiceProbe.configure(
+            mapOf(
+                "micRequested" to callMicSource,
+                "micOpened" to c.openedSource.let { if (it != 0) AecSupport.sourceName(it) else "none" },
+                "aecReport" to c.lastAec?.let { AecSupport.run { it.toMap() } },
+                "softwareAec" to if (c.softwareAecActive) SoftwareAec.report() else null,
+                "audioMode" to (am?.mode ?: -1),
+                "commDevice" to if (speaker) "SPEAKER" else "EARPIECE",
+                "bargeIn" to bargeIn,
+                "pause" to pause.toString(),
+                "bargeOffset" to offset,
+            ),
+        )
+        VoiceProbe.event("callStart")
         keepScreenOn(true)
         syncPlaying()
         return "ok"
@@ -814,10 +874,14 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
             // Spoken over: the voice steps back at once, before Dart hears of it; Dart
             // decides from what was said whether it stops or comes back up.
             if (overPlayback) stream?.takeIf { it.call }?.duck(true)
+            VoiceProbe.event("speechStart", mapOf("over" to overPlayback))
             send("speechStart", "over" to overPlayback)
         }
 
-        override fun onUtterance(wav: ByteArray, ms: Int) = send("utterance", "wav" to wav, "ms" to ms)
+        override fun onUtterance(wav: ByteArray, ms: Int) {
+            VoiceProbe.event("utterance", mapOf("ms" to ms, "bytes" to wav.size))
+            send("utterance", "wav" to wav, "ms" to ms)
+        }
 
         override fun onLevel(value: Double) = send("micLevel", "value" to value)
 
@@ -862,11 +926,13 @@ class SpeechPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
             }.getOrDefault(false)
             runCatching { am.isSpeakerphoneOn = speaker && !wired }
         }
+        VoiceProbe.event("route", mapOf("mode" to am.mode, "speaker" to speaker, "commActive" to communicationActive))
     }
 
     @Suppress("DEPRECATION")
     private fun endCall() {
         val c = capture
+        if (c != null) VoiceProbe.event("callEnd")
         capture = null
         c?.stop()
         if (c != null) keepScreenOn(false)

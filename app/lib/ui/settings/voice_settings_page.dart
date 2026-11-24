@@ -421,6 +421,7 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
               value: call.cue,
               onChanged: (on) => unawaited(calls.edit((saved) => saved.copyWith(cue: on))),
             ),
+            const _SoftwareAecTile(),
           ],
         ),
         // 通话增强在前：它是公共底层，声纹关掉也照常生效。
@@ -428,6 +429,68 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
         // 声纹在后：开关是它下面所有项的闸。
         const VoiceprintSection(),
       ],
+    );
+  }
+}
+
+/// 自建软件回声消除的开关。原生侧已有持久化和实时状态（dsh/speech 通道），
+/// 这里只负责读显示和写回；不参与 voiceSettingsProvider 那套 Dart 设置。
+class _SoftwareAecTile extends StatefulWidget {
+  const _SoftwareAecTile();
+
+  @override
+  State<_SoftwareAecTile> createState() => _SoftwareAecTileState();
+}
+
+class _SoftwareAecTileState extends State<_SoftwareAecTile> {
+  static const _channel = MethodChannel('dsh/speech');
+  bool? _enabled;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    Map<dynamic, dynamic>? r;
+    try {
+      r = await _channel.invokeMapMethod<Object?, Object?>('softwareAecStatus');
+    } on PlatformException {
+      return; // 旧版原生没有自建 AEC：整行不显示
+    }
+    if (!mounted) return;
+    setState(() => _enabled = r?['enabled'] == true);
+  }
+
+  Future<void> _toggle(bool on) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    Map<dynamic, dynamic>? r;
+    try {
+      r = await _channel.invokeMapMethod<Object?, Object?>('softwareAecSet', {'enabled': on});
+    } on PlatformException {
+      r = null;
+    }
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      if (r != null) _enabled = r['enabled'] == true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final on = _enabled;
+    if (on == null) return const SizedBox.shrink();
+    return SettingsSwitchTile(
+      key: const ValueKey('speech-call-software-aec'),
+      title: on ? '软件回声消除 · 开' : '软件回声消除 · 关',
+      subtitle: '自己拿播放参考消回声。当前 AI 语音走系统朗读，拿不到参考，'
+          '开着也不会起效；关掉可回到系统原路径。',
+      value: on,
+      onChanged: _busy ? null : (v) => unawaited(_toggle(v)),
     );
   }
 }

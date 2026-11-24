@@ -68,6 +68,7 @@ class PcmStream(
                         // 音量 7 与 1 的输出功率都是 -33 dB，usage 不决定增益）。
                         // 免提/听筒的路由交给 SpeechPlugin 的通信模式切换，不在这条轨上
                         // 设 preferredDevice——那样 patch 会建到 earpiece，轨却留在 SPEAKER。
+                        // 软件 AEC 直接从写入前的 PCM 取参考，不依赖 usage 或 HAL remap。
                         .setUsage(AudioAttributes.USAGE_MEDIA)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build(),
@@ -101,6 +102,12 @@ class PcmStream(
     fun write(bytes: ByteArray): Long {
         if (stopped || finished) return -1
         if (bytes.isNotEmpty()) {
+            // 取证：写入的是 TTS 送来的原始 PCM（播放侧参考信号），
+            // 采样率见 meta.json 的 playRate。取证关闭时这里只是一次 volatile 读。
+            VoiceProbe.playFrame(rate, bytes)
+            // 软件 AEC 的参考必须在进 AudioTrack **之前**拿：一旦写进轨道，
+            // 后面还有缓冲、硬件和空气传播，时间轴就跟采集对不上了。
+            SoftwareAec.feedPlayback(rate, bytes)
             waiting.addAndGet(bytes.size.toLong())
             queue.offer(bytes)
         }

@@ -105,6 +105,26 @@ internal object AecSupport {
     fun hasHalAec(source: Int): Boolean = source == MediaRecorder.AudioSource.VOICE_COMMUNICATION
 
     /**
+     * 软件 AEC 接管时放出的占位报告。
+     *
+     * `effective` 保持 false：它表达的是"系统 AEC 有效"，不能被软件路径
+     * 冒名顶替。诊断页另外读 SoftwareAec.report() 显示真正生效的那一套。
+     */
+    fun software(source: Int): Report = Report(
+        available = false,
+        created = false,
+        enabledCallOk = false,
+        enabledConfirmed = false,
+        nsAvailable = false,
+        nsCreated = false,
+        nsEnabledConfirmed = false,
+        source = sourceName(source),
+        sourceHasHalAec = false,
+        effective = false,
+        note = "软件 AEC 接管：不挂系统 AudioEffect，回声由播放参考 + NLMS 消除",
+    )
+
+    /**
      * 给一个已经建好的 [AudioRecord] 挂 AEC 和降噪，并记下每一层结果。
      *
      * [effects] 由调用方持有，停止录音时一起释放。

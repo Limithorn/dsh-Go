@@ -100,6 +100,30 @@ internal object MicSource {
         return remember(decide(where, want, probePeaks()))
     }
 
+    /**
+     * 软件 AEC 专用：钉死在识别音源。
+     *
+     * VOICE_COMMUNICATION 的 AEC/NS 在 HAL 里，应用关不掉；软件 AEC 若还从
+     * 这条路采，就是在已经被削过一遍的信号上再减一次参考，近端人声会被
+     * 一起吃掉。VOICE_RECOGNITION 按要求不做过度处理，正好是我们要的原始
+     * 采集；Xperia 实测它也比 VC 高 53 dB，不是"牺牲电平换 AEC"。
+     */
+    fun software(where: String): Pick {
+        val source = MediaRecorder.AudioSource.VOICE_RECOGNITION
+        return remember(
+            Pick(
+                where,
+                RECOGNITION,
+                AecSupport.sourceName(source),
+                source,
+                emptyMap(),
+                null,
+                "自建 AEC 需要不带 HAL AEC 的原始采集，固定识别音源",
+                System.currentTimeMillis(),
+            ),
+        )
+    }
+
     /** 只量不选：诊断页的「量一遍音源」用。 */
     fun probe(): Pick = remember(decide("probe", AUTO, probePeaks()))
 

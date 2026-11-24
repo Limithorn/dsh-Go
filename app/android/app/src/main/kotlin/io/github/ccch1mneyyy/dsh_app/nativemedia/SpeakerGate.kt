@@ -177,10 +177,21 @@ class SpeakerGate(
         push(frame)
         if (edge != SpeechGate.Edge.START) return edge
 
-        return when (answer()) {
+        val kind = answer()
+        return when (kind) {
             Kind.YOU -> SpeechGate.Edge.START
             // 外人：缺省拦住；开关打开时放行，上层看到 lastVerdict 是外人才会慢一拍。
-            Kind.OTHER -> if (c.allowOthers) SpeechGate.Edge.START else SpeechGate.Edge.NONE
+            //
+            // 播放时例外：这时候低分的 OTHER 几乎都是自己的回声残差——AI 声音
+            // 绕回麦克风，NLMS 削过之后和任何模板都不像，best 掉到 reject 以下
+            // 被判 OTHER。真人在场时分数会高得多（落到 UNKNOWN/YOU），不会被
+            // 这一条挡住。实测回声 0.09 就是这样放进来造成自打断的。
+            // 用 reject 再往下留一档缓冲：只有明显不是回声底的分数才放行。
+            Kind.OTHER -> if (c.allowOthers && (!playing || (latest?.score ?: 0f) > c.reject * OTHER_ECHO_FLOOR)) {
+                SpeechGate.Edge.START
+            } else {
+                SpeechGate.Edge.NONE
+            }
             // 认不准时放行，**不要拦住**。
             //
             // 早先这里是 NONE（"等人说久一点再分"），结果是死锁：开口要结论，
@@ -441,6 +452,12 @@ class SpeakerGate(
         /** 单模板默认门槛（P0 实测前先用这些值；只影响判定，不动任何现有阈值）。 */
         const val DEFAULT_ACCEPT = 0.72f
         const val DEFAULT_REJECT = 0.60f
+
+        /**
+         * 播放期间 OTHER 的回声底：分数低于 reject 的这个比例就当回声拦掉。
+         * 实测漏回来的 AI 声音只有 0.08~0.12，真人在场哪怕不是白名单也远高于此。
+         */
+        const val OTHER_ECHO_FLOOR = 0.5f
 
         fun dot(a: FloatArray, b: FloatArray): Float {
             if (a.size != b.size) return -1f

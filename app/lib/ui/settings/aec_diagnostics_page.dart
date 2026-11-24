@@ -124,11 +124,77 @@ class _AecDiagnosticsPageState extends ConsumerState<AecDiagnosticsPage> {
   bool _micRunning = false;
   String? _micNote;
 
+  /// 自建 AEC（播放参考 + NLMS）的开关和实时状态。
+  Map<Object?, Object?>? _softAec;
+  bool _softAecBusy = false;
+
+  /// 通话链路取证状态：采集流、播放流、判决事件共用一条时间轴。
+  Map<Object?, Object?>? _probeState;
+  bool _probeBusy = false;
+
   @override
   void initState() {
     super.initState();
     unawaited(_loadReport());
     unawaited(_loadMic());
+    unawaited(_loadSoftAec());
+    unawaited(_loadProbe());
+  }
+
+  Future<void> _loadSoftAec() async {
+    Map<Object?, Object?>? r;
+    try {
+      r = await _channel.invokeMapMethod<Object?, Object?>('softwareAecStatus');
+    } on PlatformException {
+      return; // 旧版原生没有自建 AEC：整块不显示
+    }
+    if (!mounted) return;
+    setState(() => _softAec = r);
+  }
+
+  Future<void> _toggleSoftAec() async {
+    if (_softAecBusy) return;
+    setState(() => _softAecBusy = true);
+    final on = _softAec?['enabled'] != true;
+    Map<Object?, Object?>? r;
+    try {
+      r = await _channel.invokeMapMethod<Object?, Object?>('softwareAecSet', {'enabled': on});
+    } on PlatformException {
+      r = null;
+    }
+    if (!mounted) return;
+    setState(() {
+      _softAecBusy = false;
+      if (r != null) _softAec = r;
+    });
+  }
+
+  Future<void> _loadProbe() async {
+    Map<Object?, Object?>? r;
+    try {
+      r = await _channel.invokeMapMethod<Object?, Object?>('probeStatus');
+    } on PlatformException {
+      return; // 旧版原生没有取证能力
+    }
+    if (!mounted) return;
+    setState(() => _probeState = r);
+  }
+
+  Future<void> _toggleProbe() async {
+    setState(() => _probeBusy = true);
+    Map<Object?, Object?>? r;
+    try {
+      r = _probeState?['active'] == true
+          ? await _channel.invokeMapMethod<Object?, Object?>('probeStop')
+          : await _channel.invokeMapMethod<Object?, Object?>('probeStart');
+    } on PlatformException {
+      r = null;
+    }
+    if (!mounted) return;
+    setState(() {
+      _probeBusy = false;
+      if (r != null) _probeState = r;
+    });
   }
 
   Future<void> _loadMic() async {
@@ -253,6 +319,8 @@ class _AecDiagnosticsPageState extends ConsumerState<AecDiagnosticsPage> {
     final call = ref.watch(callSettingsProvider);
     final r = _report;
     final has = r != null && r.isNotEmpty;
+    final probe = _probeState;
+    final probeDir = probe?['dir']?.toString() ?? '';
 
     final available = r?['available'] == true;
     final created = r?['created'] == true;
@@ -261,12 +329,62 @@ class _AecDiagnosticsPageState extends ConsumerState<AecDiagnosticsPage> {
     final effective = r?['effective'] == true;
     final source = '${r?['source'] ?? '—'}';
     final sdk = (r?['sdk'] as num?)?.toInt() ?? 0;
+    final soft = _softAec;
+    final softOn = soft?['enabled'] == true;
+    final softDelay = (soft?['delayMs'] as num?)?.toDouble();
+    final softGain = (soft?['gainDb'] as num?)?.toDouble();
+    final softDelayText = softDelay == null ? '—' : '${softDelay.toStringAsFixed(0)} ms';
+    final softGainText = softGain == null ? '—' : '${softGain.toStringAsFixed(1)} dB';
 
     return AppPage.list(
       showLargeTitle: !widget.embedded,
       title: '回声消除诊断',
       subtitle: const Text('AEC 到底开没开，断在哪一层'),
       children: [
+        if (soft != null)
+          SettingsSection(
+            title: '自建 AEC',
+            children: [
+              SettingsTile(
+                key: const ValueKey('software-aec-toggle'),
+                title: softOn ? '软件回声消除 · 开' : '软件回声消除 · 关',
+                subtitle: '拿 TTS 播放 PCM 当参考，用 NLMS 自己消回声。'
+                    '开启时采集固定走识别音源，不挂系统 AudioEffect。',
+                trailing: _softAecBusy
+                    ? const SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Switch(value: softOn, onChanged: (_) => unawaited(_toggleSoftAec())),
+                onTap: _softAecBusy ? null : _toggleSoftAec,
+              ),
+              SettingsTile(
+                title: softOn ? '运行中' : '未运行',
+                subtitle: '对齐时延 $softDelayText · 削减 $softGainText · '
+                    '${soft['mode'] ?? 'nlms'} / ${soft['taps'] ?? 0} 阶',
+              ),
+            ],
+          ),
+        SettingsSection(
+          title: '取证（软件 AEC）',
+          children: [
+            SettingsTile(
+              key: const ValueKey('probe-toggle'),
+              title: _probeBusy
+                  ? '操作中…'
+                  : (probe?['active'] == true ? '停止取证并保存' : '开始取证'),
+              subtitle: '同时录通话采集流、播放流和判决事件，共用一条时间轴。',
+              onTap: _probeBusy ? null : _toggleProbe,
+            ),
+            if (probe != null)
+              SettingsTile(
+                title: probe['active'] == true ? '取证中' : '未取证',
+                subtitle: '${probeDir.isEmpty ? '开始后生成目录' : probeDir}\n'
+                    '采集 ${probe['callBytes'] ?? 0} B · 播放 ${probe['playBytes'] ?? 0} B'
+                    '${probe['full'] == true ? ' · 已达上限，PCM 停写' : ''}',
+              ),
+          ],
+        ),
         SettingsSection(
           title: '这次采集',
           children: [

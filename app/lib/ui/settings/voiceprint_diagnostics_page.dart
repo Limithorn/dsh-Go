@@ -165,8 +165,8 @@ class _VoiceprintDiagnosticsPageState extends ConsumerState<VoiceprintDiagnostic
 
   /// 录一句（约 3 秒）→ 算声纹 → 和白名单比 → 显示结论。
   Future<void> _tryOne() async {
-    final profiles = ref.read(voiceprintProfilesProvider).value ?? const <VoiceProfile>[];
-    if (profiles.isEmpty) return;
+    final profiles = await ref.read(voiceprintProfilesProvider.future);
+    if (!mounted || profiles.isEmpty) return;
     final cut = _cutoffs(ref.read(callSettingsProvider), profiles.length);
     final l10n = context.l10n;
 

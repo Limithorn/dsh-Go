@@ -419,7 +419,10 @@ class _VoiceprintEnrollPageState extends ConsumerState<VoiceprintEnrollPage> {
       }
 
       // 去重：和已有模板太像就别再存一条。
-      final existing = ref.read(voiceprintProfilesProvider).value ?? const <VoiceProfile>[];
+      //
+      // await 而不是 .value：读盘还没完时 .value 是 null，这里会变成"没有
+      // 已有模板"，去重整个跳过，同一段声音就这样被重复录进两条。
+      final existing = await ref.read(voiceprintProfilesProvider.future);
       final closest = VoiceprintStore.closest(existing, merged);
       VoiceProfile? replacing;
       if (closest.match != null && closest.score >= VoiceprintStore.duplicateAt) {
