@@ -209,11 +209,11 @@ export DSH_TEST_FONT_DIR="C:/Users/FELiCiTas/Desktop/AGENT/HANAKO/temp/testfonts
 
 ## 七、分支与备份
 
-```
-backup/main-before-rebase        rebase 前的 main
-backup/fix-before-rebase         rebase 前的 fix
-```
+仓库已按「main 做源项目锚点，本地在独立分支开发」的约定整理：
 
-确认无误后可删除。
+- `main`：与源项目 `origin/main` 完全一致，不做本地提交、不 merge；只作 rebase 的参照和锚点。
+- `fix/mic-source-unify`：唯一的本地工作分支，全部本地改动都在这里。
+- `backup/main-before-rebase`、`backup/fix-before-rebase`（rebase 前的快照）：已确认功能无遗漏，分支已删除；提交由 tag `archive/backup-main-before-rebase`、`archive/backup-fix-before-rebase` 永久保留，需要时可从 tag 恢复。
+- 重置锚点前的本地 `main` 由 tag `archive/main-before-anchor-reset` 保留。
 
-**当前状态**：`fix/mic-source-unify`，落后上游 **0**（已追平），领先 **76** 个提交。
+如需恢复某个备份分支：`git branch <branch-name> archive/<tag-name>`。
