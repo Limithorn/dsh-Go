@@ -16,6 +16,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../companion/companion_call.dart';
 import '../../companion/companion_voice.dart';
 import '../../companion/companion_voice_source.dart';
 import '../../l10n/l10n.dart';
@@ -82,6 +83,37 @@ Future<void> openChatCall(
   );
 }
 
+/// Opens a call with [conversation]; [backdrop] is the picture behind it
+/// whatever the call settings say (her room's call shows her).
+/// 走 host 托管，收起/PiP 与聊天通话一致。
+Future<void> openVoiceCall(
+  BuildContext context, {
+  required String title,
+  required CallConversation conversation,
+  CallBackdrop? backdrop,
+}) async {
+  final container = ProviderScope.containerOf(context, listen: false);
+  final host = VoiceCallHost.instance;
+  if (host.call != null) {
+    if (host.collapsed && !host.pageUp) await host.expand(context);
+    return;
+  }
+  container.read(readAloudProvider.notifier).stop();
+  await host.openCall(
+    container: container,
+    title: title,
+    conversation: conversation,
+    backdrop: backdrop,
+    push: () => pushVoiceCallPage(
+      context,
+      call: host.call!,
+      title: title,
+      onCollapse: host.collapse,
+      backdrop: backdrop,
+    ),
+  );
+}
+
 /// The call page as one route: transparent, without a barrier (a barrier on a
 /// transparent route eats the whole screen's touches), rising out of the dark.
 /// [call] is the controller the page shows — the host (state/voice_call_host.dart)
@@ -124,6 +156,7 @@ Future<void> pushVoiceCallPage(
   required VoiceCallController call,
   required String title,
   void Function(BuildContext pageContext)? onCollapse,
+  CallBackdrop? backdrop,
 }) {
   return Navigator.of(context).push(
     PageRouteBuilder<void>(
@@ -137,6 +170,7 @@ Future<void> pushVoiceCallPage(
         conversation: call.conversation,
         controller: call,
         onCollapse: onCollapse,
+        backdrop: backdrop,
       ),
       transitionsBuilder: (_, animation, _, child) {
         final curve = CurvedAnimation(parent: animation, curve: AppMotion.enter, reverseCurve: AppMotion.exit);
@@ -397,7 +431,14 @@ class _CallPipViewState extends State<CallPipView> {
 }
 
 class VoiceCallPage extends ConsumerStatefulWidget {
-  const VoiceCallPage({super.key, required this.title, required this.conversation, this.controller, this.onCollapse});
+  const VoiceCallPage({
+    super.key,
+    required this.title,
+    required this.conversation,
+    this.controller,
+    this.onCollapse,
+    this.backdrop,
+  });
 
   final String title;
   final CallConversation conversation;
@@ -412,6 +453,10 @@ class VoiceCallPage extends ConsumerStatefulWidget {
   /// 收起 for a hosted call: tell the host (its card takes over) and pop this
   /// route. Null (the page owns the call): the page only folds itself.
   final void Function(BuildContext pageContext)? onCollapse;
+
+  /// The picture behind the call instead of the one in the call settings.
+  /// Her room's call passes her own backdrop so it shows her.
+  final CallBackdrop? backdrop;
 
   @override
   ConsumerState<VoiceCallPage> createState() => _VoiceCallPageState();
@@ -490,6 +535,10 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
       _call = VoiceCallController(
         audio: audio,
         conversation: widget.conversation,
+        verbatimInput: switch (widget.conversation) {
+          final CompanionCallConversation room => room.fullMode,
+          _ => null,
+        },
         recognizer: () async {
           // The phone's own voice warms up while the call starts, not when changed mid-reply.
           await _settleVoice(warm: _call.phase == CallPhase.starting);
@@ -957,17 +1006,20 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     // frame too: more than HarmonyOS's renderer, or the light mode, can spare.
     final keyBlur = blur && !performance.lightweight && ref.watch(operatingSystemProvider) != 'ohos';
     final ended = _call.phase == CallPhase.ended;
+    // 伙伴房间通话用自己的背景，否则听设置里的。
+    final backdrop = widget.backdrop ?? settings.backdrop;
     final image =
-        settings.backdrop == CallBackdrop.image && settings.image.isNotEmpty && File(settings.image).existsSync()
+        backdrop == CallBackdrop.image && settings.image.isNotEmpty && File(settings.image).existsSync()
         ? settings.image
         : null;
-    final her = settings.backdrop == CallBackdrop.companion && !_stageFailed;
+    final her = backdrop == CallBackdrop.companion && !_stageFailed;
     // 海：默认那片深蓝，也是"没有别的底"时的底。它够深，字要浅。
-    final sea = settings.backdrop == CallBackdrop.sea;
+    final sea = backdrop == CallBackdrop.sea;
     final (status, dots) = _status(l10n);
     final error = _call.error;
     final sessionId = switch (widget.conversation) {
       final ChatCallConversation chat => chat.sessionId,
+      final CompanionCallConversation room => room.sessionId,
       _ => null,
     };
     final width = MediaQuery.sizeOf(context).width;

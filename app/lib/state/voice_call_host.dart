@@ -33,6 +33,7 @@ import '../nativemedia/speaker_gate_bridge.dart';
 import '../speech/call/thinking_cue.dart';
 import '../speech/call/voice_call.dart';
 import '../speech/deepseek_speech.dart';
+import '../companion/companion_call.dart';
 import '../speech/speech_audio.dart';
 import '../speech/speech_out.dart';
 import '../speech/speech_settings.dart';
@@ -62,6 +63,9 @@ class VoiceCallHost extends ChangeNotifier {
   VoiceCallController? _call;
   CallVoiceBook? _book;
   ProviderContainer? _container;
+
+  /// 伙伴房间通话指定的背景；收起再展开仍要显示她。
+  CallBackdrop? _backdrop;
   List<ProviderSubscription> _subs = const [];
 
   /// 上一次见到的判定，用来避免重复记录。
@@ -133,11 +137,21 @@ class VoiceCallHost extends ChangeNotifier {
     required String title,
     required CallConversation conversation,
     required Future<void> Function() push,
+    CallBackdrop? backdrop,
   }) async {
     _container = container;
     _title = title;
+    _backdrop = backdrop;
     final book = _book = CallVoiceBook(container);
-    final made = makeChatCallController(container, conversation, book);
+    final made = makeChatCallController(
+      container,
+      conversation,
+      book,
+      verbatimInput: switch (conversation) {
+        final CompanionCallConversation room => room.fullMode,
+        _ => null,
+      },
+    );
     _call = made;
     _collapsed = false;
     _phase = made.phase;
@@ -227,7 +241,7 @@ class VoiceCallHost extends ChangeNotifier {
     _container?.read(callSurfaceProvider.notifier).set(CallSurface.full);
     notifyListeners();
     try {
-      await pushVoiceCallPage(context, call: call, title: _title, onCollapse: collapse);
+      await pushVoiceCallPage(context, call: call, title: _title, onCollapse: collapse, backdrop: _backdrop);
     } finally {
       pageDown();
     }
@@ -328,8 +342,9 @@ class VoiceCallHost extends ChangeNotifier {
 VoiceCallController makeChatCallController(
   ProviderContainer container,
   CallConversation conversation,
-  CallVoiceBook book,
-) {
+  CallVoiceBook book, {
+  bool Function()? verbatimInput,
+}) {
   VoiceCallController? made;
   final audio = container.read(speechAudioProvider);
   final deepseek = container.read(deepSeekSpeechProvider);
@@ -338,6 +353,7 @@ VoiceCallController makeChatCallController(
   made = VoiceCallController(
     audio: audio,
     conversation: conversation,
+    verbatimInput: verbatimInput,
     recognizer: () async {
       // The phone's own voice warms up while the call starts, not when
       // changed mid-reply.
