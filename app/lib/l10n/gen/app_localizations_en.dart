@@ -21980,6 +21980,15 @@ class L10nEn extends L10n {
   String get speechCallHangUp => 'Hang up';
 
   @override
+  String get speechCallCollapse => 'Shrink the call';
+
+  @override
+  String get speechCallExpand => 'Open the call';
+
+  @override
+  String get speechCallPictureInPicture => 'Shrink to a small window';
+
+  @override
   String get speechCallSpeakerOn => 'Speaker';
 
   @override

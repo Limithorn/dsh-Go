@@ -497,3 +497,70 @@ List<PillSegment<CallPause>> callPauseSegments(L10n l10n) => [
   PillSegment(CallPause.normal, l10n.speechCallPauseNormal),
   PillSegment(CallPause.patient, l10n.speechCallPausePatient),
 ];
+
+// fork(call): 通话页挑的那张底，原样给小窗用一份。
+//
+// 通话页是铺满整屏的三个分支（海 / 图片 / 她），收起后的胶囊只有 248 宽、
+// 一行高——整张图铺上去只剩一条横缝。所以这里给的不是"能看清的图"，而是
+// 同一份底的缩小版，让两张画面看起来是同一处地方。
+//
+// 返回 `null` 表示该用纯色卡片：图片那个文件这会儿读不出来，或者选了「她」
+// 但舞台还没就绪——这两种情况下通话页自己也是纯色，小窗跟着纯色才一致。
+Widget? callCardBackdrop({
+  required CallBackdrop backdrop,
+  required String image,
+  required bool her,
+}) => switch (backdrop) {
+  // 海本来就是一整片深蓝，压到胶囊里是同一处地方的小小一块。
+  CallBackdrop.sea => const _SeaStrip(),
+  // 不在这里 existsSync 判一道：那是"先问一句再画"，文件真没了还有
+  // ImageBackdrop 自己的 errorBuilder 兜底（画不出就是空的，跟通话页
+  // 一致）。多判一道只会让这一处跟通话页的判断分家，出现"整页有图、
+  // 小窗没图"这种对不上。
+  CallBackdrop.image when image.isNotEmpty => ImageBackdrop(
+    key: ValueKey(image),
+    path: image,
+    blur: false,
+  ),
+  CallBackdrop.companion when her => const _HerThumb(),
+  _ => null,
+};
+
+/// 小窗里的海：只留上下那道深蓝渐变。
+///
+/// 整页那张 [_SeaSwatch] 中间还有团径向的光（那是球体背后的光晕），铺在
+/// 248×54 的胶囊上会变成一块偏心的白斑，所以这里不搬整套。
+class _SeaStrip extends StatelessWidget {
+  const _SeaStrip();
+
+  @override
+  Widget build(BuildContext context) => const DecoratedBox(
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF10265A), Color(0xFF071330), Color(0xFF02050D)],
+      ),
+    ),
+  );
+}
+
+/// 小窗里的「她」：只取伙伴小屋那套底色，不驱动舞台动画。
+///
+/// 通话页里她是一整个动画舞台（[CompanionBackdrop]，要 controller、要
+/// onReady/onFailed）。胶囊一行高，塞一个舞台既看不清又要多养一个控制器，
+/// 还会跟通话页那个抢状态，所以这里只要"她的那种颜色"。
+class _HerThumb extends StatelessWidget {
+  const _HerThumb();
+
+  @override
+  Widget build(BuildContext context) => const DecoratedBox(
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF3B2A5A), Color(0xFF1B1430)],
+      ),
+    ),
+  );
+}

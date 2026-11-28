@@ -224,7 +224,14 @@ Offset _wander(double t, double a, double b, double phase) {
 
 /// The field, with a faint light of the theme's colour behind where the sphere sits.
 class CallField extends StatelessWidget {
-  const CallField({super.key, required this.scene, required this.palette, this.center = 0.4});
+  const CallField({
+    super.key,
+    required this.scene,
+    required this.palette,
+    this.center = 0.4,
+    this.strength = 1,
+    this.opaque = true,
+  });
 
   final CallScene scene;
   final CallPalette palette;
@@ -232,33 +239,51 @@ class CallField extends StatelessWidget {
   /// The sphere's height on the screen (0 top, 1 bottom).
   final double center;
 
+  // fork(call): How much light there is. The page keeps 1; a window a third
+  // of the screen's width wants a little more to look the same at that size.
+  final double strength;
+
+  // fork(call)
+  /// Whether to lay the theme's field colour under the light.
+  ///
+  /// The page always does (it is the whole background). The small window
+  /// must not when a picture or her sits behind it — that solid rect would
+  /// paint the backdrop out of sight, leaving a flat swatch where the
+  /// person chose a photo.
+  final bool opaque;
+
   @override
   Widget build(BuildContext context) => RepaintBoundary(
-    child: CustomPaint(painter: _FieldPainter(scene, palette, center), child: const SizedBox.expand()),
+    child: CustomPaint(
+      painter: _FieldPainter(scene, palette, center, strength, opaque),
+      child: const SizedBox.expand(),
+    ),
   );
 }
 
 class _FieldPainter extends CustomPainter {
-  _FieldPainter(this.scene, this.palette, this.center) : super(repaint: scene);
+  _FieldPainter(this.scene, this.palette, this.center, this.strength, this.opaque) : super(repaint: scene);
 
   final CallScene scene;
   final CallPalette palette;
   final double center;
+  final double strength;
+  final bool opaque;
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawRect(Offset.zero & size, Paint()..color = palette.field);
+    if (opaque) canvas.drawRect(Offset.zero & size, Paint()..color = palette.field);
     final at = Offset(size.width / 2, size.height * center);
     final radius = size.width * (0.9 + scene.energy * 0.1 + (scene.breath - 0.5) * 0.04 * scene.depth);
     final tint = _drain(palette.main, scene.muted);
-    final strength = (palette.light ? 0.2 : 0.12) + scene.energy * 0.05 + scene.breath * 0.025 * scene.depth;
+    final lit = ((palette.light ? 0.2 : 0.12) + scene.energy * 0.05 + scene.breath * 0.025 * scene.depth) * strength;
     canvas.drawCircle(
       at,
       radius,
       Paint()
         ..shader = RadialGradient(
           colors: [
-            tint.withValues(alpha: strength * scene.appear),
+            tint.withValues(alpha: lit * scene.appear),
             tint.withValues(alpha: 0),
           ],
         ).createShader(Rect.fromCircle(center: at, radius: radius)),
@@ -266,31 +291,41 @@ class _FieldPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_FieldPainter old) => old.center != center || old.palette != palette;
+  bool shouldRepaint(_FieldPainter old) =>
+      old.center != center || old.palette != palette || old.strength != strength || old.opaque != opaque;
 }
 
 /// The sphere of glass. Its resting diameter is [size] × 0.5; the rest is its glow.
 class CallLight extends StatelessWidget {
-  const CallLight({super.key, required this.scene, required this.palette, this.size = 300});
+  const CallLight({super.key, required this.scene, required this.palette, this.size = 300, this.halo = 1});
 
   final CallScene scene;
   final CallPalette palette;
   final double size;
 
+  // fork(call)
+  /// How much of the outer halo there is. The page keeps 1; in a window a
+  /// third of the screen's width the same halo reads as a grey disc round a
+  /// small sphere, so it is softened there.
+  final double halo;
+
   @override
   Widget build(BuildContext context) => RepaintBoundary(
     child: SizedBox.square(
       dimension: size,
-      child: CustomPaint(painter: _GlassPainter(scene, palette)),
+      child: CustomPaint(painter: _GlassPainter(scene, palette, halo)),
     ),
   );
 }
 
 class _GlassPainter extends CustomPainter {
-  _GlassPainter(this.scene, this.palette) : super(repaint: scene);
+  _GlassPainter(this.scene, this.palette, this.halo) : super(repaint: scene);
 
   final CallScene scene;
   final CallPalette palette;
+
+  /// 1 on the page; softened in the small window (see [CallLight.halo]).
+  final double halo;
 
   // How each light inside wanders, and how big it is.
   static const _paths = [
@@ -313,8 +348,10 @@ class _GlassPainter extends CustomPainter {
     final strength = ((light ? 0.58 : 0.5) + scene.glow * 0.6) * fade;
     final disc = Rect.fromCircle(center: center, radius: r);
 
-    // Outside: a soft halo of the theme's colour.
-    final halo = tones[2].withValues(alpha: ((light ? 0.28 : 0.18) + scene.glow * 0.45) * fade);
+    // Outside: a soft halo of the theme's colour. The field [halo] softens it
+    // in a window a third of the screen's width, where the same blur would
+    // read as a grey disc round a small sphere.
+    final haloTint = tones[2].withValues(alpha: ((light ? 0.28 : 0.18) + scene.glow * 0.45) * fade * halo);
     // A disc of r·1.02 blurred by σ = r·0.45, drawn as that blur's own falloff
     // (full well inside, half at the edge, gone 2.5σ out): a mask blur that
     // wide, every frame, is what made the call page stutter.
@@ -325,11 +362,11 @@ class _GlassPainter extends CustomPainter {
       Paint()
         ..shader = RadialGradient(
           colors: [
-            halo,
-            halo.withValues(alpha: halo.a * 0.85),
-            halo.withValues(alpha: halo.a * 0.5),
-            halo.withValues(alpha: halo.a * 0.12),
-            halo.withValues(alpha: 0),
+            haloTint,
+            haloTint.withValues(alpha: haloTint.a * 0.85),
+            haloTint.withValues(alpha: haloTint.a * 0.5),
+            haloTint.withValues(alpha: haloTint.a * 0.12),
+            haloTint.withValues(alpha: 0),
           ],
           stops: const [0, 0.266, 0.476, 0.727, 1],
         ).createShader(Rect.fromCircle(center: center, radius: outer)),
