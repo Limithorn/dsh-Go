@@ -55,6 +55,25 @@
 
 首次同步按规范 §4 SOP 执行：先跑基线 → merge → 按本表逐文件核对 → 逐模块测试、分模块提交 → `archive/*` tag。
 
+### 2026-11-28 同步回填（MIC-105：self-dev 线落地）
+
+**落点变更**：用户拍板工作线 = `self-dev`（2026-11-28）。self-dev 无本地提交，直接快进到 `origin/main`（`c4b6f4810`，含上游 80 个新提交），再 cherry-pick 地基提交（规范文档、`.gitattributes`、本登记表首版），行尾按新规则 `git add --renormalize` 重导出 19 个上游残留 CRLF 文件（仅改行尾）。**self-dev 线上没有 fork 代码**，因此上表 6 处冲突在此线全部不存在——它们是 fix 线（`fix/mic-source-unify`）合 main 时的事；fix 线保持为功能移植参考实现、不动，上表对 fix 线下次合并仍然有效。
+
+**6 处冲突文件：上游 80 提交实际动了什么**（`git diff db854f6f7..c4b6f4810` 逐文件核对）：
+
+| 文件 | 上游改动 | self-dev 落法 | 对移植任务（MIC-95~103）的意义 |
+|---|---|---|---|
+| `AndroidManifest.xml` | +10：新增 `RemoteBackgroundService`（FGS `specialUse\|location`，后台保活远程连接） | 上游原样（无 fork 块可保留） | 06/07 的 Manifest 挂点（`FOREGROUND_SERVICE_MICROPHONE` + 权限）以**独立 service 条目**并列落进同一区域，不与它共用块 |
+| `DshFlutterEngine.kt` | +28/−2：`plugins.add` 重构（`val runtime = RuntimePlugin()`）＋内联注册新通道 `…/remote_background`（4 方法） | 上游原样 | **上游自己开始用「引擎工厂内联通道」模式**；06 的 wake 注册行落同一 `.also{}` 块，原 :58-60 行位已变 |
+| `MainActivity.kt` | +3：`RemoteBackgroundService.onHostStarted/onHostStopped` 生命周期两处 | 上游原样 | 07 的 4 处生命周期挂点与这两处共存，移植时逐处核对 |
+| `speech/CallCapture.kt` | +6/−1：静音期 `onLevel(0.0)` 只发一次（`mutedLevelSent` 去重） | 上游原样 | 05 的 AEC 接入点（增益/电平之前）不变，但电平消费语义变了——AEC/诊断移植后按新行为验证 |
+| `app/lib/app.dart` | +12：`didHaveMemoryPressure`（PetSheets/BotAvatar 缓存回收）、`remoteBackgroundProvider` watch、3 个 import | 上游原样 | 01/06 的 app.dart 挂点（import、`warmLocalTts()`、`navigatorKey`）在重排后的文件上重新锚定 |
+| `app/lib/state/app_info.dart` | +1/−1：版本默认值 `1.3.0+1` → `1.4.1+1` | 上游原样 | 09 诊断页引用的版本常量随上游走 |
+
+**新触点核对结论**：上游 80 提交（240 文件，+14020/−937）**未触及 §2 任何一个高危热点**——`SpeechPlugin.kt`、`speech_settings.dart`（`CallSettings`）、`voice_settings_page.dart`、`settings_widgets.dart`、`voice_call_page.dart`、`voice_call.dart`、`gradle.properties`、`speech_fakes.dart`、`companion_voice_source.dart`、`PcmStream.kt` 全部 0 改动。新内容集中在已登记的 6 个 B 列挂点文件自身的上游侧前移（上表）＋fork 无关域（remote 后台服务、pet overlay、companion、workshop、非 speech 的 l10n parts、docs/guide）。speech 域仅有的上游小改：`deepseek_speech.dart` 零拷贝 yield（+2/−1）、`ui/speech/call/call_parts.dart` 的 `CaptionWindow` 改 stateful 缓存 TextPainter（+48/−15）、`test/speech/voice_call_page_test.dart` +22——**07 移植时须一并接住上游对该页新增的测试**。
+
+**无需新增登记行**：新触点全部落在既有 B 列挂点文件上；无新插件文件、无新 Activity 分支、无新设置结构（`CallSettings` 零改动）。
+
 ---
 
 ## 4. MIC-94 验收覆盖对照
@@ -74,3 +93,5 @@
 - **fork(...) 打标：0 处。** 分支上尚无 R2 格式的挂点标记（`DshFlutterEngine.kt:58` 有说明注释但未按格式打标）。打标随各功能点重构任务（MIC-95~103）落地，落地时回填本表。
 - **行尾：64 个 CRLF 文件已归一**（独立提交，仅改行尾）；`.gitattributes` 补 `dart/kt/properties/gradle` 及实际出现 CRLF 的 `yml/json/arb/sh/txt/LICENSE` 规则；patch/diff 类 `-text` 条目原样保留。
 - 表中 ± 行数以 `origin/main`（基点 `db854f6f7`）为参照；每次同步后如冲突热度与实际不符，勘误保留、不删行。
+- **2026-11-28 上游同步（MIC-105）已完成**：self-dev 线 = `c4b6f4810`（上游 80 提交）＋ 地基提交 ＋ 本回填；同步前后打 `archive/self-dev-{before,after}-sync-20261128` tag。self-dev 上 `fork(` 打标仍为 0 处（随 MIC-95~103 落地）；fix 线未动，仍为移植参考。
+- 上游残留 CRLF：19 个文件已随同步按 `.gitattributes` 重导（独立提交，仅改行尾，`git diff --ignore-cr-at-eol` 为空证明）。
