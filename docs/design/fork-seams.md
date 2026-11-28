@@ -11,7 +11,7 @@
 
 | # | 模块 | 自有区 A | 上游挂点 B（重构落地时打 `fork(<module>)` 标记） | 共享区热点 C（± vs main，热度） | 关闭时行为（R4） | 不做它会怎样 |
 |---|---|---|---|---|---|---|
-| 01 | 离线 TTS（Kokoro） | `app/lib/speech/local_tts.dart`（+297，`dsh-tts` isolate 协议自成一体） | `app/lib/companion/companion_voice_source.dart` 枚举 + fetch 分支；`app.dart` import + 预热 `warmLocalTts()`（:103）；l10n `parts/speech_*.arb` | `companion_voice_source.dart`（低；与 02 共用同一挂点） | 声音源选回系统/Edge，行为与上游一致 | 少一个本地离线音源；下载/校验链路不存在；其余声音源无感 |
+| 01 | 离线 TTS（Kokoro）·**2026-11-28 已落地 self-dev（MIC-95）** | `app/lib/speech/local_tts.dart`（+297 照搬；解包走 `Isolate.run`，加载/合成留主 isolate——后台 isolate 里 eSpeak 设嗓音 abort，见 `docs/design/local-tts-handoff.md`） | `companion_voice_source.dart`：枚举 +1 值、`localVoice` 字段（ctor/copyWith/plain/fromPlain）、`configured`、fetch `_local` 分支、`warmLocalTts()`——全部已打 `fork(tts)`；`app.dart`：import ×2 + initState 预热块；`companion_voice_page.dart`：import + initState 探测 + 音源列表 1 行 + 下载分区；`voice_settings_page.dart`：`speechVoiceLabel` 补 1 臂（枚举加值必改）；l10n `parts/companion_{zh,en}.arb` +6 键（ARB 是 JSON，无法内联打标，以本表代登记） | `companion_voice_source.dart`（低；与 02 共用同一挂点，02 落地时相邻行逐行核对） | 声音源选回 system/DeepSeek 等上游音源 → fetch 走上游分支，行为与上游一致；`localVoice` 随存档持久 | 少一个本地离线音源；下载/校验链路不存在；其余声音源无感 |
 | 02 | Edge 云端 TTS | `app/lib/speech/edge_tts.dart`（+416，裸 websocket 协议） | 同 01：`companion_voice_source.dart` 枚举分支；设置页音色选择；l10n | 同 01（低） | 不可用/被关 → 回落其他声音源，错误可执行不静默 | 少一个免费云端音色源；协议失效风险随整模块消失 |
 | 03 | 声纹门控 | `nativemedia/CampplusEmbedder.kt`、`KaldiFbank.kt`（+315）、`SpeakerGate.kt`（+514）、`Thresholds.kt`、`speech/Voiceprint.kt`（+359）；Dart：`speech/sherpa_speaker_embedder.dart`、`nativemedia/speaker_gate_bridge.dart`（+356） | `SpeechPlugin.createGate()` 挂接；`TurnGate.bargeOffset` 扩展 | **`SpeechPlugin.kt` +985/−332（高）**——voiceprint 域方法按 R3 拆 `dsh/voiceprint` 通道 | 关/无模板时逐帧完全直通（三条不变量第一条） | 无"只听本人"门控，唤醒/插话对所有说话人放行；04 的模板失去消费者 |
 | 04 | 声纹录入、存储与诊断 | `speech/VoiceprintRecorder.kt`（+363）；`lib/speech/voiceprint_store.dart`（+290，加密存储）、`voiceprint_log.dart`；`ui/settings/voiceprint_enroll_page.dart`（+503）、`voiceprint_list_page.dart`（+205）、`voiceprint_entry_page.dart`、`voiceprint_diagnostics_page.dart`（+261） | 设置入口；l10n | **`SpeechPlugin.kt`（高，通道拆分与 03 协调）**；`app/test/speech/speech_fakes.dart` +10/−1（中，只加不改，R7） | 无模板 → 判定直通（与 03 衔接） | 无录入/管理界面；03 保持直通态即安全 |
@@ -37,6 +37,11 @@
 | `app/test/speech/speech_fakes.dart` | +10/−1 | 中 | 全域共享测试协议：**只加不改**（R7） |
 | `app/android/gradle.properties` | +39/−11 | 低量·必核对 | 09；CRLF 已归一（本任务），内容冲突仍需人工看 |
 | `app/lib/l10n/parts/speech_*.arb` 及 gen | +448/−138 | 低 | 生成器兜底，中英同步走 `l10n_merge.py` |
+
+> **勘误（2026-11-28，MIC-95 落地时发现；按规范 R10 勘误保留，不删原行）**：原行 01 的 B 列两处不准——
+> ① l10n 挂点实际在 `parts/companion_*.arb`（TTS 文案域），非 `parts/speech_*.arb`；② 漏登两处真实挂点：
+> `companion_voice_page.dart`（下载/进度/失败行内展示）与 `voice_settings_page.dart` 的 `speechVoiceLabel`
+> （穷举 switch，枚举加值必补臂）。行 01 已按落地实况改写，勘误在此留痕。
 
 ---
 
@@ -90,7 +95,7 @@
 
 ## 5. 当前状态备注
 
-- **fork(...) 打标：0 处。** 分支上尚无 R2 格式的挂点标记（`DshFlutterEngine.kt:58` 有说明注释但未按格式打标）。打标随各功能点重构任务（MIC-95~103）落地，落地时回填本表。
+- **fork(...) 打标：tts 域已打（MIC-95，`git grep "fork(tts)" 可列全）；其余域仍 0 处。** 打标随各功能点重构任务（MIC-96~103）落地，落地时回填本表。`DshFlutterEngine.kt:58` 仍只有说明注释、未按格式打标。
 - **行尾：64 个 CRLF 文件已归一**（独立提交，仅改行尾）；`.gitattributes` 补 `dart/kt/properties/gradle` 及实际出现 CRLF 的 `yml/json/arb/sh/txt/LICENSE` 规则；patch/diff 类 `-text` 条目原样保留。
 - 表中 ± 行数以 `origin/main`（基点 `db854f6f7`）为参照；每次同步后如冲突热度与实际不符，勘误保留、不删行。
 - **2026-11-28 上游同步（MIC-105）已完成**：self-dev 线 = `c4b6f4810`（上游 80 提交）＋ 地基提交 ＋ 本回填；同步前后打 `archive/self-dev-{before,after}-sync-20261128` tag。self-dev 上 `fork(` 打标仍为 0 处（随 MIC-95~103 落地）；fix 线未动，仍为移植参考。

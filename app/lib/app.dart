@@ -7,11 +7,16 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'companion/companion_initiative_owner.dart' show companionInitiativeProvider;
+// fork(tts): 预热本地 Kokoro 音源（warmLocalTts 与两处设置读取）。
+import 'companion/companion_voice_source.dart'
+    show CompanionVoiceSource, companionVoiceSettingsProvider, warmLocalTts;
 import 'companion/companion_always_on.dart' show companionAlwaysOnOwnerProvider;
 import 'companion/companion_residency.dart' show companionResidencyProvider;
 import 'companion/companion_state.dart' show companionPhoneSessionsBridgeProvider;
 import 'pets/pet_overlay_bridge.dart' show petOverlayBridgeProvider;
 import 'pets/pet_sheets.dart';
+// fork(tts): 朗读自己的声音设置里也可能选了本地音源（预热判断用）。
+import 'speech/speech_settings.dart' show speechVoiceSettingsProvider;
 import 'l10n/l10n.dart';
 import 'performance/performance_state.dart';
 import 'performance/refresh_rate.dart';
@@ -88,6 +93,23 @@ class _DshAppState extends ConsumerState<DshApp> with WidgetsBindingObserver {
     if (ref.read(starPromptGateProvider)) ref.read(starPromptProvider);
     // 伙伴小屋: her invitation ledger is read now, so it is known before the room opens.
     ref.read(companionInitiativeProvider);
+    // fork(tts): 朗读的声音: if the offline pack is the chosen voice, load it
+    // now, so the first sentence does not wait for 311 MB (local_tts.dart).
+    // Both settings pages can choose it: 朗读's own, and hers when it does not
+    // follow.
+    unawaited(() async {
+      try {
+        final speech = await ref.read(speechVoiceSettingsProvider.notifier).ready();
+        var warm = speech.source == CompanionVoiceSource.local;
+        if (!warm) {
+          final hers = await ref.read(companionVoiceSettingsProvider.notifier).ready();
+          warm = !hers.follow && hers.source == CompanionVoiceSource.local;
+        }
+        if (warm) await warmLocalTts();
+      } on Object {
+        // Left for the first real sentence to report.
+      }
+    }());
     // 刷新率: some systems cap third-party apps at 60 Hz and then show their per-app
     // switch as an in-app setting; the app answers frames to run at the fastest rate
     // while it is actually drawing (see RefreshRateService).

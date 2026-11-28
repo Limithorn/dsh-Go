@@ -10730,6 +10730,42 @@ abstract class L10n {
   /// **'自定义 HTTP'**
   String get companionVoiceCustom;
 
+  /// No description provided for @companionVoiceLocal.
+  ///
+  /// In zh, this message translates to:
+  /// **'本地模型（Kokoro）'**
+  String get companionVoiceLocal;
+
+  /// No description provided for @companionVoiceLocalHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'全离线，不联网也不按字数花钱；要先下载模型'**
+  String get companionVoiceLocalHint;
+
+  /// No description provided for @companionVoiceLocalNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载后完全离线：不联网、不按字数花钱。首次合成要加载一百多 MB 的模型，会慢几秒'**
+  String get companionVoiceLocalNote;
+
+  /// No description provided for @companionVoiceLocalDownload.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载模型'**
+  String get companionVoiceLocalDownload;
+
+  /// No description provided for @companionVoiceLocalReady.
+  ///
+  /// In zh, this message translates to:
+  /// **'模型已就绪'**
+  String get companionVoiceLocalReady;
+
+  /// No description provided for @companionVoiceLocalSize.
+  ///
+  /// In zh, this message translates to:
+  /// **'约 334 MB，只下一次'**
+  String get companionVoiceLocalSize;
+
   /// No description provided for @companionVoiceCustomHint.
   ///
   /// In zh, this message translates to:

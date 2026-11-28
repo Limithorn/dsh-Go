@@ -18,6 +18,8 @@ import '../../companion/companion_voice.dart';
 import '../../companion/companion_voice_source.dart';
 import '../../l10n/l10n.dart';
 import '../../speech/deepseek_speech.dart';
+// fork(tts): 本地离线音源的下载/校验与安装状态（local_tts.dart）。
+import '../../speech/local_tts.dart';
 import '../../speech/speech_settings.dart';
 import '../../state/account_state.dart';
 import '../../state/android_features.dart' show operatingSystemProvider;
@@ -79,6 +81,63 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
   void initState() {
     super.initState();
     _store; // Bind now, not on first use.
+    // fork(tts): 打开这页先问一句本地模型装没装。
+    unawaited(_refreshLocal());
+  }
+
+  // fork(tts): Whether the offline pack is on the phone (null: not asked yet).
+  bool? _localReady;
+  int _localPercent = 0;
+  bool _localBusy = false;
+
+  /// Why the last attempt stopped, shown on the row itself: a snack bar can be
+  /// missed, and a download that cannot start is the common case (no route to
+  /// the release server).
+  String? _localError;
+
+  Future<void> _refreshLocal() async {
+    var ready = false;
+    try {
+      ready = await localTtsInstalled() != null;
+    } on Object {
+      // No path_provider (widget tests) or no storage: nothing is installed.
+    }
+    if (!mounted) return;
+    setState(() => _localReady = ready);
+  }
+
+  /// One line of a failure, for the row under the model's name.
+  String _shortError(Object error) {
+    final text = error is LocalTtsError ? error.reason : '$error';
+    final line = text.split('\n').first.trim();
+    return line.length > 110 ? '${line.substring(0, 110)}\u2026' : line;
+  }
+
+  /// Fetches and unpacks the pack; the page stays open while it runs.
+  Future<void> _installLocal() async {
+    if (_localBusy) return;
+    setState(() {
+      _localBusy = true;
+      _localPercent = 0;
+      _localError = null;
+    });
+    try {
+      await installLocalTts(
+        onProgress: (received, total) {
+          if (!mounted) return;
+          setState(() => _localPercent = total == 0 ? 0 : received * 100 ~/ total);
+        },
+      );
+      await _refreshLocal();
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _localReady = false;
+        _localError = _shortError(error);
+      });
+    } finally {
+      if (mounted) setState(() => _localBusy = false);
+    }
   }
 
   bool _obscure = true;
@@ -394,6 +453,8 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
                 (CompanionVoiceSource.preset, l10n.companionVoicePreset, l10n.companionVoicePresetHint),
                 (CompanionVoiceSource.openai, l10n.companionVoiceOpenai, l10n.companionVoiceOpenaiHint),
                 (CompanionVoiceSource.custom, l10n.companionVoiceCustom, l10n.companionVoiceCustomHint),
+                // fork(tts): 本地离线一档；ohos 上没有这套模型，与其余三项同一条件屏蔽。
+                (CompanionVoiceSource.local, l10n.companionVoiceLocal, l10n.companionVoiceLocalHint),
               ],
             ])
               SettingsTile(
@@ -596,6 +657,37 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
                   ),
                 ],
               ),
+            ],
+          ),
+        // fork(tts): 本地模型一节：下载进度、就绪态、失败原因都在行内，不静默。
+        if (!following && s.source == CompanionVoiceSource.local)
+          SettingsSection(
+            title: l10n.companionVoiceLocal,
+            footer: Text(l10n.companionVoiceLocalNote),
+            children: [
+              SettingsTile(
+                key: const ValueKey('voice-local-model'),
+                title: _localReady == true ? l10n.companionVoiceLocalReady : l10n.companionVoiceLocalDownload,
+                subtitle: _localBusy
+                    ? '$_localPercent%'
+                    : _localReady == true
+                    ? null
+                    : _localError ?? l10n.companionVoiceLocalSize,
+                chevron: false,
+                onTap: _localBusy || _localReady == true ? null : () => unawaited(_installLocal()),
+              ),
+              if (_localBusy)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: LinearProgressIndicator(
+                      key: const ValueKey('voice-local-progress'),
+                      value: _localPercent <= 0 ? null : _localPercent / 100,
+                      minHeight: 6,
+                    ),
+                  ),
+                ),
             ],
           ),
         Padding(
