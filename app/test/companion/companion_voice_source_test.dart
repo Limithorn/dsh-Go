@@ -10,6 +10,8 @@ import 'dart:typed_data';
 import 'package:dsh_app/companion/companion_state.dart';
 import 'package:dsh_app/companion/companion_voice.dart';
 import 'package:dsh_app/companion/companion_voice_source.dart';
+// fork(tts): Edge 音色默认值（edge_tts.dart）。
+import 'package:dsh_app/speech/edge_tts.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -181,6 +183,19 @@ void main() {
       expect(await why(http.Response('{"error":"quota"}', 200)), 'not audio');
       expect(await why(http.Response('{"data":{}}', 200), field: 'data.audio'), 'no field data.audio');
       expect(await why(http.Response('<html>', 200), field: 'data'), 'reply is not JSON');
+    });
+
+    test('the local voice says why it cannot speak, instead of going silent', () async {
+      try {
+        await fetchCompanionVoice(
+          const CompanionVoiceSettings(source: CompanionVoiceSource.local),
+          '你好',
+          MockClient((_) async => http.Response('x', 200)),
+        );
+        fail('no error');
+      } on CompanionVoiceError catch (error) {
+        expect(error.reason, startsWith('local'));
+      }
     });
   });
 
@@ -361,6 +376,32 @@ void main() {
       expect(back.on, isTrue);
       expect(back.openaiKey, '');
       expect(back.source, CompanionVoiceSource.system);
+    });
+
+    test('the Kokoro voice is remembered across the archive (48 until one is picked)', () {
+      const settings = CompanionVoiceSettings(source: CompanionVoiceSource.local, localVoice: 49);
+      expect(settings.configured, isTrue); // whether the pack is on the phone is answered when asking.
+      expect(CompanionVoiceSettings().localVoice, 48); // zf_xiaoyi, the default.
+      final back = CompanionVoiceSettings.fromPlain(jsonDecode(jsonEncode(settings.plain())), on: true);
+      expect(back.source, CompanionVoiceSource.local);
+      expect(back.localVoice, 49);
+      // An archive saved before the local voice existed still resolves, to the default.
+      final old = CompanionVoiceSettings.fromPlain({'source': 'local'}, on: true);
+      expect(old.source, CompanionVoiceSource.local);
+      expect(old.localVoice, 48);
+    });
+
+    test('the Edge voice is remembered across the archive (Xiaoyi until one is picked)', () {
+      const settings = CompanionVoiceSettings(source: CompanionVoiceSource.edge, edgeVoice: 'zh-CN-YunxiNeural');
+      expect(settings.configured, isTrue); // free and keyless; whether it answers is known when asking.
+      expect(CompanionVoiceSettings().edgeVoice, edgeDefaultVoice); // zh-CN-XiaoyiNeural.
+      final back = CompanionVoiceSettings.fromPlain(jsonDecode(jsonEncode(settings.plain())), on: true);
+      expect(back.source, CompanionVoiceSource.edge);
+      expect(back.edgeVoice, 'zh-CN-YunxiNeural');
+      // An archive saved before the Edge source existed still resolves, to the default.
+      final old = CompanionVoiceSettings.fromPlain({'source': 'edge'}, on: true);
+      expect(old.source, CompanionVoiceSource.edge);
+      expect(old.edgeVoice, edgeDefaultVoice);
     });
 
     test('her persona: the person\'s part first, the app\'s rules always after', () {

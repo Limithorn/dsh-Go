@@ -686,7 +686,8 @@ void main() {
 
     for (final (os, sources) in [
       ('ohos', ['deepseek', 'system']),
-      ('android', ['deepseek', 'system', 'preset', 'openai', 'custom']),
+      // fork(tts): android 多本地离线与 Edge 云端两档（ohos 都屏蔽，仍只有前两项）。
+      ('android', ['deepseek', 'system', 'preset', 'openai', 'custom', 'local', 'edge']),
     ]) {
       testWidgets('朗读 on $os offers the voices it can play: $sources', (tester) async {
         SharedPreferences.setMockInitialValues({});

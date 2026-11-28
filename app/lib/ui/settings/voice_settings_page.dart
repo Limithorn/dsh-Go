@@ -41,6 +41,10 @@ String speechVoiceLabel(L10n l10n, CompanionVoiceSettings? voice) => switch (voi
   CompanionVoiceSettings(source: CompanionVoiceSource.preset) => voice.presetInfo.name,
   CompanionVoiceSettings(source: CompanionVoiceSource.openai) => l10n.companionVoiceOpenai,
   CompanionVoiceSettings(source: CompanionVoiceSource.custom) => l10n.companionVoiceCustom,
+  // fork(tts): 本地 Kokoro 一档在朗读的设置行里也叫它的名字。
+  CompanionVoiceSettings(source: CompanionVoiceSource.local) => l10n.companionVoiceLocal,
+  // fork(tts): Edge 云端一档同样叫它的名字。
+  CompanionVoiceSettings(source: CompanionVoiceSource.edge) => l10n.companionVoiceEdge,
 };
 
 /// The model's name as its authors write it (not translated).

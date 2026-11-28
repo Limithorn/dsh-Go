@@ -6134,6 +6134,35 @@ class L10nEn extends L10n {
   String get companionVoiceCustom => 'Custom HTTP';
 
   @override
+  String get companionVoiceLocal => 'On this phone (Kokoro)';
+
+  @override
+  String get companionVoiceLocalHint => 'Fully offline and no per-character cost; the model downloads first';
+
+  @override
+  String get companionVoiceLocalNote =>
+      'Fully offline once installed: no network, no per-character cost. The first sentence waits for the 100+ MB model to load';
+
+  @override
+  String get companionVoiceLocalDownload => 'Download the model';
+
+  @override
+  String get companionVoiceLocalReady => 'Model ready';
+
+  @override
+  String get companionVoiceLocalSize => 'About 334 MB, downloaded once';
+
+  @override
+  String get companionVoiceEdge => 'Edge online (Microsoft)';
+
+  @override
+  String get companionVoiceEdgeHint => 'The voices behind Edge\'s read-aloud: no key, no charge, needs a network';
+
+  @override
+  String get companionVoiceEdgeFooter =>
+      'The text goes to Microsoft only to be spoken, and is not kept. The pace above applies.';
+
+  @override
   String get companionVoiceCustomHint => 'Anything else: describe the request and the reply';
 
   @override
