@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- fork(call): 通话形态模块自己的原生文案（CallNotification.kt）。
+     与 wake_strings.xml 同一模式：不进共享的 i18n_strings.xml，上游同步零冲突。 -->
+<resources>
+    <string name="call_channel_name">Voice call</string>
+    <string name="call_channel_description">Shows that a voice call is still in progress. Tap to return to it.</string>
+    <string name="call_notification_title">Voice call in progress</string>
+    <string name="call_notification_text">Dsh Go is still listening and speaking. Tap to return to the call.</string>
+</resources>

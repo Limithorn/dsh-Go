@@ -1,18 +1,23 @@
 package io.github.ccch1mneyyy.dsh_app
 
 import android.Manifest
+import android.app.PictureInPictureParams
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
+import android.util.Rational
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -25,6 +30,7 @@ import io.flutter.plugin.common.MethodChannel
 import io.github.ccch1mneyyy.dsh_app.companion.CompanionAssistant
 import io.github.ccch1mneyyy.dsh_app.launch.LaunchScreen
 import io.github.ccch1mneyyy.dsh_app.launch.LaunchThemeSync
+import io.github.ccch1mneyyy.dsh_app.notify.CallNotification
 import io.github.ccch1mneyyy.dsh_app.remote.RemoteBackgroundService
 import io.github.ccch1mneyyy.dsh_app.runtime.AndroidBackgroundProtection
 import io.github.ccch1mneyyy.dsh_app.runtime.LaunchStart
@@ -37,6 +43,13 @@ class MainActivity : FlutterActivity() {
     private val assistantMain = Handler(Looper.getMainLooper())
     private var assistantYield: MethodChannel.Result? = null
     private val assistantYieldTimeout = Runnable { finishAssistantYield(false) }
+
+    // fork(call): 正在语音通话（由 Dart 侧的 call setCallActive 告知），
+    // 按 home 时据此决定是否缩成画中画。
+    private var callActive = false
+
+    // fork(call): 通话时屏幕靠近脸就熄（耗电和误触都省了），挂断释放。
+    private var proxWake: PowerManager.WakeLock? = null
 
     /** The selection toolbar's text actions, asked of the engine once (see [CachedTextActions]). */
     private var textActions: CachedTextActions? = null
@@ -115,6 +128,22 @@ class MainActivity : FlutterActivity() {
         // Coming back counts as activity: the first frames may not be scheduled yet.
         framesActive = true
         applyRefreshRate()
+        // fork(call): 锁屏回来了：从「锁屏不算后台」改回正常判断。
+        appChannel?.invokeMethod("callScreenLocked", false)
+        // fork(call): 回到前台就把 PiP 的 autoEnter 与当前通话状态重新对齐。
+        // setCallActive(false) 那次 setPictureInPictureParams 可能因 Activity
+        // 当时不在前台而没落上去，系统会一直记着 autoEnter=true；那样即使
+        // 根本没有通话，下一次按返回/home 也会自动把页面缩成小窗。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            runCatching {
+                setPictureInPictureParams(
+                    PictureInPictureParams.Builder()
+                        .setAspectRatio(Rational(3, 4))
+                        .setAutoEnterEnabled(callActive)
+                        .build(),
+                )
+            }
+        }
     }
 
     /**
@@ -171,9 +200,53 @@ class MainActivity : FlutterActivity() {
 
     override fun onPause() {
         inForeground = false
-        framesActive = false
-        applyRefreshRate()
+        // fork(call): 通话中锁屏：Activity 被盖住了，但麦克风还在（麦克风类型的前台服务撑着）。
+        // 告诉 Dart 这种情况不算「切到后台」，否则通话会自己结束——
+        // 之前锁屏叫醒后界面刚出来、一秒就退，就是这个。
+        if (callActive) {
+            val locked = runCatching {
+                getSystemService(android.app.KeyguardManager::class.java)?.isKeyguardLocked == true
+            }.getOrDefault(false)
+            if (locked) appChannel?.invokeMethod("callScreenLocked", true)
+        }
+        // fork(call): 画中画里不能停帧：小窗是活的，停帧就是画面定在那儿不动。
+        if (!isInPictureInPictureMode) {
+            framesActive = false
+            applyRefreshRate()
+        }
         super.onPause()
+    }
+
+    // fork(call): 语音通话进行中按 home / 切到别的 App：直接缩成画中画，而不是退到后台。
+    // 退到后台麦克风会被系统掉，通话就断了（画中画里的 Activity 仍算可见）。
+    override fun onUserLeaveHint() {
+        if (callActive) enterPip()
+        super.onUserLeaveHint()
+    }
+
+    // fork(call): 画中画进出时告诉 Dart：小窗里要换成简版布局。
+    // 同时把渲染重新打开：进小窗那一刻 onPause 可能已经把帧停了。
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        if (isInPictureInPictureMode) {
+            framesActive = true
+            inForeground = true
+            applyRefreshRate()
+        }
+        appChannel?.invokeMethod("pictureInPictureChanged", isInPictureInPictureMode)
+    }
+
+    // fork(call): 缩成画中画；系统或机型不支持时返回 false。
+    private fun enterPip(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return false
+        return try {
+            enterPictureInPictureMode(
+                PictureInPictureParams.Builder().setAspectRatio(Rational(3, 4)).build(),
+            )
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun finishAssistantYield(stopped: Boolean) {
@@ -247,6 +320,122 @@ class MainActivity : FlutterActivity() {
                     )
                     result.success(null)
                 }
+                // fork(call): 语音通话, shrink the whole app into a system window over other apps, so
+                // the call keeps the microphone (a picture-in-picture activity still counts
+                // as visible) and the conversation is one tap away. Returns false when the
+                // system or the device does not allow it.
+                "enterPictureInPicture" -> result.success(enterPip())
+                // fork(call): Whether the system has picture-in-picture for this app at all.
+                "pictureInPictureAvailable" -> {
+                    val available = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                        packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+                    result.success(available)
+                }
+                // fork(call): 通话页告诉原生现在是不是在通话，按 home 时据此决定要不要缩成小窗。
+                "setCallActive" -> {
+                    callActive = call.argument<Boolean>("active") ?: false
+                    // 通话中让音量键去调媒体流（官方文档 Controlling Your App's Volume and Playback 的做法）。
+                    // 理由：这条音轨的增益本来就按媒体流算（Pixel 上通话音量 7 与 1 的输出功率都是 -33.0 dB），
+                    // 键指到通话音量反而调不动。挂断就还原，界面里别的按键不受影响。
+                    volumeControlStream =
+                        if (callActive) AudioManager.STREAM_MUSIC else AudioManager.USE_DEFAULT_STREAM_TYPE
+                    // 常驻"语音通话中"通知：小窗按 x 关掉后通话还在，通知栏让用户看得见；
+                    // 点它回到 App。生命周期跟 callActive 一致，只在通话真正结束时撤掉。
+                    if (callActive) CallNotification.show(applicationContext)
+                    else CallNotification.cancel(applicationContext)
+                    // Android 12 起该用 autoEnter：事先告诉系统「我在通话」，
+                    // 人一按 home 它自己就缩成小窗。onUserLeaveHint 里再调一次
+                    // 在 12+ 上容易被当成「Activity 已经走了」而失败，
+                    // 这就是之前按 home 后小窗没出来的原因。
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        runCatching {
+                            setPictureInPictureParams(
+                                PictureInPictureParams.Builder()
+                                    .setAspectRatio(Rational(3, 4))
+                                    .setAutoEnterEnabled(callActive)
+                                    .build(),
+                            )
+                        }
+                    }
+                    result.success(null)
+                }
+                // fork(call): 通话页的屏幕行为：锁竖屏（通话时转横屏只会让按钮错位），
+                // 并持一个 PROXIMITY_SCREEN_OFF 唤醒锁——手机贴到耳边就熄屏。
+                "setCallScreen" -> {
+                    val on = call.argument<Boolean>("on") ?: false
+                    if (on) {
+                        runCatching { requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
+                        // 锁屏时也要能亮起来把通话页显出来（唤醒词在锁屏时叫醒要靠它们），
+                        // 否则 bringToFront 被锁屏挡住，看起来就是「锁屏不能唤醒」。
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                            runCatching {
+                                setShowWhenLocked(true)
+                                setTurnScreenOn(true)
+                            }
+                        } else {
+                            @Suppress("DEPRECATION")
+                            runCatching {
+                                window.addFlags(
+                                    android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                        android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
+                                )
+                            }
+                        }
+                        if (proxWake == null) {
+                            runCatching {
+                                val pm = getSystemService(PowerManager::class.java)
+                                proxWake = pm?.newWakeLock(
+                                    PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,
+                                    "dsh:call-proximity",
+                                )?.apply {
+                                    setReferenceCounted(false)
+                                    acquire()
+                                }
+                            }
+                        }
+                    } else {
+                        runCatching { requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                            runCatching {
+                                setShowWhenLocked(false)
+                                setTurnScreenOn(false)
+                            }
+                        }
+                        runCatching { proxWake?.release() }
+                        proxWake = null
+                    }
+                    result.success(null)
+                }
+                // fork(call): 整页通话被收起（返回键/收起键）时调一次。锁屏亮屏时通话页靠
+                // showWhenLocked 浮在 keyguard 之上，按返回只是把它收成卡片，底下的
+                // 对话页仍顶着锁屏显示，要按第二次才回到锁屏。这里在收起之际撤掉
+                // 那两个 flag，keyguard 立刻盖上来：一次返回就回锁屏，解锁后是对话页。
+                //
+                // 是否锁屏由原生判断——showWhenLocked 时 Activity 处于 resumed，
+                // Dart 侧收不到 onPause 的"锁屏"通知，判不准。没锁屏则什么都不做，
+                // 免得破坏正常收起后的卡片态和唤醒词锁屏叫醒。
+                "leaveCallToLock" -> {
+                    val locked = runCatching {
+                        getSystemService(android.app.KeyguardManager::class.java)?.isKeyguardLocked == true
+                    }.getOrDefault(false)
+                    if (locked) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                            runCatching {
+                                setShowWhenLocked(false)
+                                setTurnScreenOn(false)
+                            }
+                        } else {
+                            @Suppress("DEPRECATION")
+                            runCatching {
+                                window.clearFlags(
+                                    android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                        android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
+                                )
+                            }
+                        }
+                    }
+                    result.success(locked)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -262,7 +451,14 @@ class MainActivity : FlutterActivity() {
 
     // Back on the home screen sends the app to the background instead of finishing the activity
     // (Android 12's default for launcher roots): coming back finds it as it was.
-    override fun popSystemNavigator(): Boolean = moveTaskToBack(true)
+    // fork(call): A call must not go to the background that way: the back key does not fire
+    // onUserLeaveHint, so autoEnter never runs, the microphone is taken away and
+    // every spoken sentence fails to reach the conversation afterwards. Dart
+    // asks for PiP itself when 收起; this is the fallback for any other pop.
+    override fun popSystemNavigator(): Boolean {
+        if (callActive && enterPip()) return true
+        return moveTaskToBack(true)
+    }
 
     /** Flutter produced a frame recently (see RefreshRateService): auto mode follows it. */
     private var framesActive = true

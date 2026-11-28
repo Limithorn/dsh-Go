@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- fork(call): 通话形态模块自己的原生文案（CallNotification.kt）。 -->
+<resources>
+    <string name="call_channel_name">语音通话</string>
+    <string name="call_channel_description">显示语音通话仍在进行，点按可返回通话。</string>
+    <string name="call_notification_title">语音通话进行中</string>
+    <string name="call_notification_text">小鲸鱼还在听你说话，点按返回通话。</string>
+</resources>
