@@ -1,3 +1,17 @@
 # Nested patches are applied to upstream sources byte for byte; never convert their line endings.
 tooling/ios/phone-self-runner/*.patch -text
 runtime/tawcroot/*.diff -text
+
+# LF unification (docs/design/fork-modularity-standard.md R8): repo text files are
+# LF-only. CRLF once faked a whole-file conflict on a 1900-line three-way merge.
+*.dart text eol=lf
+*.kt text eol=lf
+*.properties text eol=lf
+*.gradle text eol=lf
+# Other text types that actually turned up CRLF on the fork branch.
+*.yml text eol=lf
+*.json text eol=lf
+*.arb text eol=lf
+*.sh text eol=lf
+*.txt text eol=lf
+LICENSE text eol=lf
