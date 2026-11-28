@@ -10766,6 +10766,24 @@ abstract class L10n {
   /// **'约 334 MB，只下一次'**
   String get companionVoiceLocalSize;
 
+  /// No description provided for @companionVoiceEdge.
+  ///
+  /// In zh, this message translates to:
+  /// **'Edge 云端（微软）'**
+  String get companionVoiceEdge;
+
+  /// No description provided for @companionVoiceEdgeHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'微软 Edge 朗读的那套声音，不用 key、不花钱，要联网'**
+  String get companionVoiceEdgeHint;
+
+  /// No description provided for @companionVoiceEdgeFooter.
+  ///
+  /// In zh, this message translates to:
+  /// **'这些声只在合成那一刻送到微软，文本不会被存下来。语速跟随上面的设置。'**
+  String get companionVoiceEdgeFooter;
+
   /// No description provided for @companionVoiceCustomHint.
   ///
   /// In zh, this message translates to:

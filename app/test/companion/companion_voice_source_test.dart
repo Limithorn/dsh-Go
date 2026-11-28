@@ -10,6 +10,8 @@ import 'dart:typed_data';
 import 'package:dsh_app/companion/companion_state.dart';
 import 'package:dsh_app/companion/companion_voice.dart';
 import 'package:dsh_app/companion/companion_voice_source.dart';
+// fork(tts): Edge 音色默认值（edge_tts.dart）。
+import 'package:dsh_app/speech/edge_tts.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -387,6 +389,19 @@ void main() {
       final old = CompanionVoiceSettings.fromPlain({'source': 'local'}, on: true);
       expect(old.source, CompanionVoiceSource.local);
       expect(old.localVoice, 48);
+    });
+
+    test('the Edge voice is remembered across the archive (Xiaoyi until one is picked)', () {
+      const settings = CompanionVoiceSettings(source: CompanionVoiceSource.edge, edgeVoice: 'zh-CN-YunxiNeural');
+      expect(settings.configured, isTrue); // free and keyless; whether it answers is known when asking.
+      expect(CompanionVoiceSettings().edgeVoice, edgeDefaultVoice); // zh-CN-XiaoyiNeural.
+      final back = CompanionVoiceSettings.fromPlain(jsonDecode(jsonEncode(settings.plain())), on: true);
+      expect(back.source, CompanionVoiceSource.edge);
+      expect(back.edgeVoice, 'zh-CN-YunxiNeural');
+      // An archive saved before the Edge source existed still resolves, to the default.
+      final old = CompanionVoiceSettings.fromPlain({'source': 'edge'}, on: true);
+      expect(old.source, CompanionVoiceSource.edge);
+      expect(old.edgeVoice, edgeDefaultVoice);
     });
 
     test('her persona: the person\'s part first, the app\'s rules always after', () {

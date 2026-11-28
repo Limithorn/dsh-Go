@@ -18,6 +18,8 @@ import '../../companion/companion_voice.dart';
 import '../../companion/companion_voice_source.dart';
 import '../../l10n/l10n.dart';
 import '../../speech/deepseek_speech.dart';
+// fork(tts): Edge 云端音源与音色表（edge_tts.dart）。
+import '../../speech/edge_tts.dart';
 // fork(tts): 本地离线音源的下载/校验与安装状态（local_tts.dart）。
 import '../../speech/local_tts.dart';
 import '../../speech/speech_settings.dart';
@@ -455,6 +457,8 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
                 (CompanionVoiceSource.custom, l10n.companionVoiceCustom, l10n.companionVoiceCustomHint),
                 // fork(tts): 本地离线一档；ohos 上没有这套模型，与其余三项同一条件屏蔽。
                 (CompanionVoiceSource.local, l10n.companionVoiceLocal, l10n.companionVoiceLocalHint),
+                // fork(tts): Edge 云端一档；ohos 不走这条裸 websocket 路线，同一条件屏蔽。
+                (CompanionVoiceSource.edge, l10n.companionVoiceEdge, l10n.companionVoiceEdgeHint),
               ],
             ])
               SettingsTile(
@@ -487,6 +491,27 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
                   onTap: () {
                     setState(() => _preview = null);
                     unawaited(_set(s.copyWith(deepseekVoice: voice)));
+                  },
+                ),
+            ],
+          ),
+        // fork(tts): Edge 音色选择：一列音色直接选；协议钉在 Edge 扩展上，
+        // 哪天失效也只是这一路声音源换掉，失败原因行内可读（companion_voice.dart）。
+        if (!following && chosen == CompanionVoiceSource.edge)
+          SettingsSection(
+            title: l10n.companionVoiceVoice,
+            footer: Text(l10n.companionVoiceEdgeFooter),
+            children: [
+              for (final voice in edgeVoices)
+                SettingsTile(
+                  key: ValueKey('voice-edge-${voice.id}'),
+                  title: voice.label,
+                  subtitle: voice.lang,
+                  chevron: false,
+                  trailing: s.edgeVoice == voice.id ? const Icon(AppIcons.selected, size: 20) : null,
+                  onTap: () {
+                    setState(() => _preview = null);
+                    unawaited(_set(s.copyWith(edgeVoice: voice.id)));
                   },
                 ),
             ],

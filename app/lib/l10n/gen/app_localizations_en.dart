@@ -6153,6 +6153,16 @@ class L10nEn extends L10n {
   String get companionVoiceLocalSize => 'About 334 MB, downloaded once';
 
   @override
+  String get companionVoiceEdge => 'Edge online (Microsoft)';
+
+  @override
+  String get companionVoiceEdgeHint => 'The voices behind Edge\'s read-aloud: no key, no charge, needs a network';
+
+  @override
+  String get companionVoiceEdgeFooter =>
+      'The text goes to Microsoft only to be spoken, and is not kept. The pace above applies.';
+
+  @override
   String get companionVoiceCustomHint => 'Anything else: describe the request and the reply';
 
   @override
